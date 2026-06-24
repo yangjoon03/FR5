@@ -232,7 +232,7 @@ class RobotStatePkg(Structure):
         # 状态信号
         ("EmergencyStop", c_uint8),  # 急停标志，0-急停未按下，1-急停按下
         ("motion_done", c_int),  # 运动到位信号，1-到位，0-未到位
-        ("gripper_motiondone", c_uint8),  # 夹爪运动完成信号，1-完成，0-未完成
+        ("gripper_motiondone", c_uint8),  # 夹爪运动完成信号，0-未完成，1-完成(未检测到物体)，2-运动完成（检测到物体）
         ("mc_queue_len", c_int),  # 运动指令队列长度
         ("collisionState", c_uint8),  # 碰撞检测，1-碰撞，0-无碰撞
         ("trajectory_pnum", c_int),  # 轨迹点编号
@@ -241,7 +241,7 @@ class RobotStatePkg(Structure):
 
         # 夹爪信息
         ("gripper_fault_id", c_uint8),  # 错误夹爪号
-        ("gripper_fault", c_uint16),  # 夹爪故障
+        ("gripper_fault", c_uint16),  # 夹爪故障 0-无故障 1-485超时 2-指令错误 3-工件掉落 其他-夹爪故障码
         ("gripper_active", c_uint16),  # 夹爪激活状态
         ("gripper_position", c_uint8),  # 夹爪位置
         ("gripper_speed", c_int8),  # 夹爪速度
@@ -1323,7 +1323,7 @@ _ip_states: Dict[str, List[RobotState]] = {}
 """   
     @brief  设置CNDE默认配置（在RPC连接前调用）
     @param  [in] states: RobotState枚举列表
-    @param  [in] period: 数据周期(ms)，范围8-1000，默认8ms
+    @param  [in] period: 数据周期(ms)，范围4-1000，默认8ms
     @return 错误码 成功-0  失败-错误码
 """
 
@@ -1334,8 +1334,8 @@ def SetRobotRealtimeStateConfig(states: List[RobotState], period: int = 500) -> 
     if not states:
         print("错误：至少需要一个状态")
         return RobotError.ERR_NEED_AT_LEAST_ONE_STATE
-    if period < 8 or period > 1000:
-        print("错误：周期必须在8-1000ms之间")
+    if period < 4 or period > 1000:
+        print("错误：周期必须在4-1000ms之间")
         return RobotError.ERR_PARAM_VALUE
 
     DEFAULT_CNDE_STATES = states.copy()
@@ -1430,8 +1430,8 @@ def DeleteRobotRealtimeState(states: List[RobotState], ip: str = None) -> int:
 def SetRobotRealtimeStatePeriod(period: int, ip: str = None) -> int:
     global DEFAULT_CNDE_PERIOD
 
-    if period < 8 or period > 1000:
-        print(f"错误：周期必须在8-1000ms之间，当前值: {period}ms")
+    if period < 4 or period > 1000:
+        print(f"错误：周期必须在4-1000ms之间，当前值: {period}ms")
         return RobotError.ERR_PARAM_VALUE
 
     if ip:
@@ -1866,7 +1866,8 @@ class FRCNDEClient:
 
                 if recv_pkg.type == CNDE_FRAME_TYPE_OUTPUT_DATA:
                     self._parse_cnde_state_data(recv_pkg.data)
-
+                    # timestamp_ms = int(time.time() * 1000)
+                    # print(f"当前时间戳: {timestamp_ms} 毫秒")
         if self._tcp_socket:
             try:
                 self._tcp_socket.close()
@@ -2179,7 +2180,7 @@ class FRCNDEClient:
         """
         if not states:
             return self.ERR_NEED_AT_LEAST_ONE_STATE
-        if period < 8 or period > 1000:
+        if period < 4 or period > 1000:
             return self.ERR_PARAM_VALUE
 
         # 运行过程中禁止修改配置
@@ -2193,7 +2194,7 @@ class FRCNDEClient:
 
     def set_cnde_state_period(self, period: int) -> int:
         """设置CNDE状态数据周期"""
-        if period < 8 or period > 1000:
+        if period < 4 or period > 1000:
             return self.ERR_PARAM_VALUE
         self._robot_state_period = period
         if self._robot_state_run_flag and self._tcp_socket:
@@ -2509,7 +2510,7 @@ class RPC():
         设置CNDE状态订阅配置
         Args:
             states: RobotState枚举列表
-            period: 数据周期(ms)，范围8-1000
+            period: 数据周期(ms)，范围4-1000
         Returns:
             0-成功，其他-错误码
         """
@@ -2548,7 +2549,7 @@ class RPC():
         """
         设置CNDE数据周期
         Args:
-            period: 数据周期(ms)，范围8-1000
+            period: 数据周期(ms)，范围4-1000
         Returns:
             0-成功，其他-错误码
         """
@@ -2782,7 +2783,7 @@ class RPC():
             time.sleep(0.1)
 
         error = 0
-        sdk = ["SDK:V2.2.5", "Robot:V3.9.5"]
+        sdk = ["SDK:V2.2.7", "Robot:V3.9.7"]
         return error, sdk
 
     """   
@@ -2824,6 +2825,7 @@ class RPC():
             time.sleep(0.1)
 
         state = int(state)
+
         flag = True
         while flag:
             try:
@@ -3117,6 +3119,125 @@ class RPC():
 
         return error1
 
+    @log_call
+    @xmlrpc_timeout
+    def MoveL1(self, desc_pos, tool, user, joint_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=0.0, ovl=100.0,
+              blendR=-1.0, blendMode=0, exaxis_pos=[0.0, 0.0, 0.0, 0.0], search=0, offset_flag=0,
+              offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], config=-1, overSpeedStrategy=0,
+              speedPercent=10):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+        desc_pos = list(map(float, desc_pos))
+        tool = int(tool)
+        user = int(user)
+        joint_pos = list(map(float, joint_pos))
+        vel = float(vel)
+        acc = float(acc)
+        ovl = float(ovl)
+        blendR = float(blendR)
+        blendMode = int(blendMode)
+        exaxis_pos = list(map(float, exaxis_pos))
+        search = int(search)
+        offset_flag = int(offset_flag)
+        offset_pos = list(map(float, offset_pos))
+        config = int(config)
+        overSpeedStrategy = int(overSpeedStrategy)
+        speedPercent = int(speedPercent)
+        if (overSpeedStrategy > 0):
+            error = self.robot.JointOverSpeedProtectStart(overSpeedStrategy, speedPercent)
+            if error != 0:
+                return error
+        if ((joint_pos[0] == 0.0) and (joint_pos[1] == 0.0) and (joint_pos[2] == 0.0) and (joint_pos[3] == 0.0)
+                and (joint_pos[4] == 0.0) and (joint_pos[5] == 0.0)):  # 若未输入参数则调用逆运动学求解
+            ret = self.robot.GetInverseKin(0, desc_pos, config)  # 逆运动学求解
+            if ret[0] == 0:
+                joint_pos = [ret[1], ret[2], ret[3], ret[4], ret[5], ret[6]]
+            else:
+                error1 = ret[0]
+                return error1
+
+        flag = True
+        while flag:
+            try:
+                error1 = self.robot.MoveL(
+                    [joint_pos[0], joint_pos[1], joint_pos[2], joint_pos[3], joint_pos[4], joint_pos[5], desc_pos[0],
+                     desc_pos[1], desc_pos[2], desc_pos[3], desc_pos[4], desc_pos[5], tool, user, vel, acc, ovl, blendR,
+                     blendMode, exaxis_pos[0], exaxis_pos[1], exaxis_pos[2], exaxis_pos[3], search, offset_flag,
+                     offset_pos[0], offset_pos[1], offset_pos[2], offset_pos[3], offset_pos[4], offset_pos[5]])
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        if (overSpeedStrategy > 0):
+            error = self.robot.JointOverSpeedProtectEnd()
+            if error != 0:
+                return error
+
+        return error1
+
+    @log_call
+    @xmlrpc_timeout
+    def MoveL2(self, desc_pos, tool, user, joint_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=0.0, ovl=100.0,
+              blendR=-1.0, blendMode=0, exaxis_pos=[0.0, 0.0, 0.0, 0.0], search=0, offset_flag=0,
+              offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], oacc=100.0, config=-1, velAccParamMode=0, overSpeedStrategy=0,
+              speedPercent=10,status= 0):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+        desc_pos = list(map(float, desc_pos))
+        tool = int(tool)
+        user = int(user)
+        joint_pos = list(map(float, joint_pos))
+        vel = float(vel)
+        acc = float(acc)
+        ovl = float(ovl)
+        blendR = float(blendR)
+        blendMode = int(blendMode)
+        exaxis_pos = list(map(float, exaxis_pos))
+        search = int(search)
+        offset_flag = int(offset_flag)
+        offset_pos = list(map(float, offset_pos))
+        oacc = float(oacc)
+        config = int(config)
+        velAccParamMode = int(velAccParamMode)
+        overSpeedStrategy = int(overSpeedStrategy)
+        speedPercent = int(speedPercent)
+        status = int(status)
+        if (overSpeedStrategy > 0):
+            error = self.robot.JointOverSpeedProtectStart(overSpeedStrategy, speedPercent)
+            if error != 0:
+                return error
+        if ((joint_pos[0] == 0.0) and (joint_pos[1] == 0.0) and (joint_pos[2] == 0.0) and (joint_pos[3] == 0.0)
+                and (joint_pos[4] == 0.0) and (joint_pos[5] == 0.0)):  # 若未输入参数则调用逆运动学求解
+            ret = self.robot.GetInverseKin(0, desc_pos, config)  # 逆运动学求解
+            if ret[0] == 0:
+                joint_pos = [ret[1], ret[2], ret[3], ret[4], ret[5], ret[6]]
+            else:
+                error1 = ret[0]
+                return error1
+
+        flag = True
+        while flag:
+            try:
+                error1 = self.robot.MoveL(
+                    [joint_pos[0], joint_pos[1], joint_pos[2], joint_pos[3], joint_pos[4], joint_pos[5], desc_pos[0],
+                     desc_pos[1], desc_pos[2], desc_pos[3], desc_pos[4], desc_pos[5], tool, user, vel, acc, ovl, blendR,
+                     blendMode, exaxis_pos[0], exaxis_pos[1], exaxis_pos[2], exaxis_pos[3], search, offset_flag,
+                     offset_pos[0], offset_pos[1], offset_pos[2], offset_pos[3], offset_pos[4], offset_pos[5], oacc,
+                     velAccParamMode,status])
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        if (overSpeedStrategy > 0):
+            error = self.robot.JointOverSpeedProtectEnd()
+            if error != 0:
+                return error
+
+        return error1
     """   
     @brief  笛卡尔空间圆弧运动(自动正/逆运动学计算)
     @param  [in] 必选参数 desc_pos_p: 路径点笛卡尔位姿，单位 [mm][°]
@@ -3400,7 +3521,7 @@ class RPC():
 
     @log_call
     @xmlrpc_timeout
-    def NewSpiral(self, desc_pos, tool, user, param, joint_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=0.0,
+    def NewSpiral(self, desc_pos, tool, user, param, joint_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=20,
                   exaxis_pos=[0.0, 0.0, 0.0, 0.0],
                   ovl=100.0, offset_flag=0, offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], config=-1):
         while self.reconnect_flag:
@@ -6709,7 +6830,7 @@ class RPC():
 
     """   
     @brief  轨迹预处理
-    @param  [in] 必选参数 name：轨迹名 如/fruser/traj/trajHelix_aima_1.txt
+    @param  [in] 必选参数 name：轨迹名 如trajHelix_aima_1.txt,同时兼容全路径文件名，如/fruser/traj/trajHelix_aima_1.txt
     @param  [in] 必选参数 ovl 速度缩放百分比，范围[0~100]
     @param  [in] 默认参数 opt 1-控制点，默认为1
     @return 错误码 成功- 0, 失败-错误码
@@ -6833,6 +6954,39 @@ class RPC():
 
         return error
 
+    @log_call
+    @xmlrpc_timeout
+    def SetTrajectoryJSpeed1(self, ovl):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+        ovl = float(ovl)
+        flag = True
+        while flag:
+            try:
+                error = self.robot.SetTrajectoryJSpeed(ovl)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        return error
+
+    @log_call
+    @xmlrpc_timeout
+    def SetTrajectoryJSpeed3(self, ovl, mode,status):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+        ovl = float(ovl)
+        mode = int(mode)
+        status = int(status)
+        flag = True
+        while flag:
+            try:
+                error = self.robot.SetTrajectoryJSpeed(ovl, mode,status)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        return error
     """   
     @brief  设置轨迹运行中的力和扭矩
     @param  [in] 必选参数 ft [fx,fy,fz,tx,ty,tz]，单位N和Nm
@@ -6994,7 +7148,7 @@ class RPC():
     """   
     @brief  设置开机自动加载默认的作业程序
     @param  [in] 必选参数 flag：0-开机不自动加载默认程序，1-开机自动加载默认程序
-    @param  [in] 必选参数 program_name：作业程序名及路径，如“/fruser/movej.lua”，其中“/fruser/”为固定路径
+    @param  [in] 必选参数 program_name：作业程序名，如“movej.lua”
     @return 错误码 成功- 0, 失败-错误码
     """
 
@@ -7017,7 +7171,7 @@ class RPC():
 
     """   
     @brief  加载指定的作业程序
-    @param  [in] 必选参数 program_name：作业程序名及路径，如“/fruser/movej.lua”，其中“/fruser/”为固定路径
+    @param  [in] 必选参数 program_name：作业程序名，如“movej.lua”
     @return 错误码 成功- 0, 失败-错误码
     """
 
@@ -9016,8 +9170,9 @@ class RPC():
                     # tmpWeldDesc = [data[6],data[7],data[8],data[9],data[10],data[11]]
                     # tmpTool = int(data[12])
                     # tmpUser = int(data[13])
-                    rtn = self.robot.MoveL(endJPos, endDesePos, tool, user, vel, acc, ovl, blendR, 0, exaxis_pos,
-                                           search, 0, endOffPos)
+                    rtn = self.MoveL(joint_pos=endJPos, desc_pos=endDesePos, tool=tool, user=user, vel=vel, acc=acc, ovl=ovl, blendR=blendR, blendMode=0,
+                                             exaxis_pos=exaxis_pos,
+                                             search=search, offset_flag=0, offset_pos=endOffPos)
                     # print("rtn3", rtn,endJPos,endDesePos)
                     if rtn != 0:
                         self.robot.ARCEnd(weldIOType, arcNum, weldTimeout)
@@ -9067,9 +9222,9 @@ class RPC():
                     tmpUser = int(data[13])
                     # print("tmpJoint",tmpJoint,tmpWeldDesc,tmpTool,tmpUser)
                     time.sleep(1)
-                    nihao = self.robot.MoveL(tmpJoint, tmpWeldDesc, tmpTool, tmpUser, vel, acc, ovl, blendR, 0,
-                                             exaxis_pos,
-                                             search, 0, endOffPos)
+                    nihao = self.MoveL(joint_pos=tmpJoint, desc_pos=tmpWeldDesc, tool=tmpTool, user=tmpUser, vel=vel, acc=acc, ovl=ovl, blendR=blendR, blendMode=0,
+                                             exaxis_pos=exaxis_pos,
+                                             search=search, offset_flag=0, offset_pos=endOffPos)
                     # print("rtn10nihao", nihao)
                     if nihao != 0:
                         self.robot.ARCEnd(weldIOType, arcNum, weldTimeout)
@@ -9107,8 +9262,9 @@ class RPC():
                     # tmpWeldDesc = [data[6], data[7], data[8], data[9], data[10], data[11]]
                     # tmpTool = int(data[12])
                     # tmpUser = int(data[13])
-                    rtn = self.robot.MoveL(endJPos, endDesePos, tool, user, vel, acc, ovl, blendR, 0, exaxis_pos,
-                                           search, 0, endOffPos)
+                    rtn = self.MoveL(joint_pos=endJPos, desc_pos=endDesePos, tool=tool, user=user, vel=vel, acc=acc, ovl=ovl, blendR=blendR, blendMode=0,
+                                             exaxis_pos=exaxis_pos,
+                                             search=search, offset_flag=0, offset_pos=endOffPos)
                     # print("rtn15", rtn,endJPos,endDesePos)
                     if rtn != 0:
                         return rtn
@@ -9132,9 +9288,9 @@ class RPC():
                     tmpWeldDesc = [data[6], data[7], data[8], data[9], data[10], data[11]]
                     tmpTool = int(data[12])
                     tmpUser = int(data[13])
-                    rtn = self.robot.MoveL(tmpJoint, tmpWeldDesc, tmpTool, tmpUser, vel, acc, ovl, blendR, 0,
-                                           exaxis_pos,
-                                           search, 0, endOffPos)
+                    nihao = self.MoveL(joint_pos=tmpJoint, desc_pos=tmpWeldDesc, tool=tmpTool, user=tmpUser, vel=vel, acc=acc, ovl=ovl, blendR=blendR, blendMode=0,
+                                             exaxis_pos=exaxis_pos,
+                                             search=search, offset_flag=0, offset_pos=endOffPos)
                     # print("rtn17", rtn)
                     if rtn != 0:
                         return rtn
@@ -9417,7 +9573,7 @@ class RPC():
             return rtn
         port = 20011
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.settimeout(2)
+        client.settimeout(5)
         try:
             client.connect((self.ip_address, port))
         except Exception as e:
@@ -11040,8 +11196,8 @@ class RPC():
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         desc_pos_p = list(map(float, desc_pos_p))
-        tool_p = float(int(tool_p))
-        user_p = float(int(user_p))
+        tool_p = int(tool_p)
+        user_p = int(user_p)
         joint_pos_p = list(map(float, joint_pos_p))
         vel_p = float(vel_p)
         acc_p = float(acc_p)
@@ -11050,8 +11206,8 @@ class RPC():
         offset_pos_p = list(map(float, offset_pos_p))
 
         desc_pos_t = list(map(float, desc_pos_t))
-        tool_t = float(int(tool_t))
-        user_t = float(int(user_t))
+        tool_t = int(tool_t)
+        user_t = int(user_t)
         joint_pos_t = list(map(float, joint_pos_t))
         vel_t = float(vel_t)
         acc_t = float(acc_t)
@@ -11087,11 +11243,10 @@ class RPC():
         flag = True
         while flag:
             try:
-                error = self.robot.MoveC(joint_pos_p, desc_pos_p, [tool_p, user_p, vel_p, acc_p], exaxis_pos_p,
-                                         offset_flag_p,
-                                         offset_pos_p, joint_pos_t, desc_pos_t, [tool_t, user_t, vel_t, acc_t],
-                                         exaxis_pos_t,
-                                         offset_flag_t, offset_pos_t, ovl, blendR)
+                error = self.MoveC(desc_pos_p, tool_p, user_p,  desc_pos_t,tool_t, user_t,joint_pos_p,
+                                         joint_pos_t, vel_p,acc_p, exaxis_pos_p,offset_flag_p,
+                                         offset_pos_p, vel_t, acc_t,exaxis_pos_t,offset_flag_t, offset_pos_t,
+                                         ovl, blendR,100,config,0)
                 flag = False
             except socket.error as e:
                 flag = True
@@ -12869,12 +13024,13 @@ class RPC():
     @param  [in] forceSensorEnable 力传感器启用状态，0-不启用；1-启用
     @param  [in] gripperEnable 夹爪启用状态，0-不启用；1-启用
     @param  [in] IOEnable IO设备启用状态，0-不启用；1-启用
+    @param  [in] dexhandEnable 灵巧手启用状态，0-不启用；1-启用
     @return 错误码 成功- 0, 失败-错误码        
     """
 
     @log_call
     @xmlrpc_timeout
-    def SetAxleLuaEnableDeviceType(self, forceSensorEnable, gripperEnable, IOEnable):
+    def SetAxleLuaEnableDeviceType(self, forceSensorEnable, gripperEnable, IOEnable, dexhandEnable):
         while self.reconnect_flag:
             time.sleep(0.1)
         forceSensorEnable = int(forceSensorEnable)
@@ -12883,7 +13039,7 @@ class RPC():
         flag = True
         while flag:
             try:
-                error = self.robot.SetAxleLuaEnableDeviceType(forceSensorEnable, gripperEnable, IOEnable)
+                error = self.robot.SetAxleLuaEnableDeviceType(forceSensorEnable, gripperEnable, IOEnable, dexhandEnable)
                 flag = False
             except socket.error as e:
                 flag = True
@@ -12896,6 +13052,7 @@ class RPC():
     @return 返回值（调用成功返回） forceSensorEnable 力传感器启用状态，0-不启用；1-启用
     @return 返回值（调用成功返回） gripperEnable 夹爪启用状态，0-不启用；1-启用
     @return 返回值（调用成功返回） IOEnable IO设备启用状态，0-不启用；1-启用
+    @return 返回值（调用成功返回） dexhandEnable 灵巧手启用状态，0-不启用；1-启用
     """
 
     @log_call
@@ -12912,7 +13069,7 @@ class RPC():
                 flag = True
 
         if error[0] == 0:
-            return error[0], error[1], error[2], error[3]
+            return error[0], error[1], error[2], error[3], error[4]
         else:
             return error
 
@@ -12922,6 +13079,7 @@ class RPC():
     @return 返回值（调用成功返回） forceSensorEnable[8] 力传感器启用状态，0-不启用；1-启用
     @return 返回值（调用成功返回） gripperEnable[8] 夹爪启用状态，0-不启用；1-启用
     @return 返回值（调用成功返回） IOEnable[8]  IO设备启用状态，0-不启用；1-启用
+    @return 返回值（调用成功返回） decHandEnable 灵巧手启用设备编号，0-不启用；1-启用
     """
 
     @log_call
@@ -12939,21 +13097,25 @@ class RPC():
 
         if error[0] == 0:
             par = error[1].split(',')
-            if 24 != len(par):
+            if 40 != len(par):
                 self.log_error("GetAxleLuaEnableDevice fail")
                 return -1, None, None, None
             else:
                 print(par)
                 return (error[0], [par[0], par[1], par[2], par[3], par[4], par[5], par[6], par[7]],
                         [par[8], par[9], par[10], par[11], par[12], par[13], par[14], par[15]],
-                        [par[16], par[17], par[18], par[19], par[20], par[21], par[22], par[23]])
+                        [par[16], par[17], par[18], par[19], par[20], par[21], par[22], par[23]],
+                        [par[24], par[25], par[26], par[27], par[28], par[29], par[30], par[31],
+                        par[32], par[33], par[34], par[35], par[36], par[37], par[38], par[39]])
         else:
             return error, None, None, None
 
     """   
     @brief  设置启用夹爪动作控制功能
     @param  [in] id 夹爪设备编号
-    @param  [in] func 0-夹爪使能；1-夹爪初始化；2-位置设置；3-速度设置；4-力矩设置；6-读夹爪状态；7-读初始化状态；8-读故障码；9-读位置；10-读速度；11-读力矩,12-15预留
+    @param  [in] func 0-夹爪使能；1-夹爪初始化；2-位置设置；3-速度设置；4-力矩设置；6-读夹爪状态；7-读初始化状态；8-读故障码；9-读位置；10-读速度；11-读力矩,
+    12-旋转夹爪旋转圈数设置； 13-旋转夹爪旋转速度设置； 14-旋转夹爪旋转力矩设置； 15-读旋转夹爪状态；16-读旋转夹爪初始化状态；17-读旋转夹爪圈数；
+    18-读旋转夹爪速度；19-读旋转夹爪力矩；20-多轴同步运动设置；21-故障清除指令；22-单轴运行状态；23-所有轴运行状态；
     @return 错误码 成功- 0, 失败-错误码        
     """
 
@@ -12979,7 +13141,9 @@ class RPC():
     @brief  获取启用夹爪动作控制功能
     @param  [in] id 夹爪设备编号
     @return 错误码 成功- 0, 失败-错误码   
-    @return 返回值（调用成功返回） func 0-夹爪使能；1-夹爪初始化；2-位置设置；3-速度设置；4-力矩设置；6-读夹爪状态；7-读初始化状态；8-读故障码；9-读位置；10-读速度；11-读力矩
+    @return 返回值（调用成功返回） func 0-夹爪使能；1-夹爪初始化；2-位置设置；3-速度设置；4-力矩设置；6-读夹爪状态；7-读初始化状态；8-读故障码；9-读位置；10-读速度；11-读力矩,
+    12-旋转夹爪旋转圈数设置； 13-旋转夹爪旋转速度设置； 14-旋转夹爪旋转力矩设置； 15-读旋转夹爪状态；16-读旋转夹爪初始化状态；17-读旋转夹爪圈数；
+    18-读旋转夹爪速度；19-读旋转夹爪力矩；20-多轴同步运动设置；21-故障清除指令；22-单轴运行状态；23-所有轴运行状态；
     """
 
     @log_call
@@ -12999,8 +13163,8 @@ class RPC():
         if error[0] == 0:
             par = error[1].split(',')
             print(len(par))
-            if 16 != len(par):
-                self.log_error("GetAxleLuaEnableDevice fail")
+            if 32 != len(par):
+                self.log_error("GetAxleLuaGripperFunc fail")
                 return -1
             else:
                 return (error[0], [par[0], par[1], par[2], par[3], par[4], par[5], par[6], par[7], par[8],
@@ -13383,11 +13547,10 @@ class RPC():
             time.sleep(0.1)
         mode = int(mode)
         ioType = int(ioType)
-        param = [ioType, mode]
         flag = True
         while flag:
             try:
-                error = self.robot.SetWeldMachineCtrlMode(param)
+                error = self.robot.SetWeldMachineCtrlMode(ioType,mode)
                 flag = False
             except socket.error as e:
                 flag = True
@@ -14873,7 +15036,7 @@ class RPC():
         while self.reconnect_flag:
             time.sleep(0.1)
 
-        return 0, self.robot_state_pkg.gripper_fault, self.robot_state_pkg.gripper_tmp
+        return 0, self.robot_state_pkg.gripper_fault, self.robot_state_pkg.gripper_temp
 
     """   
     @brief  获取夹爪速度
@@ -15301,7 +15464,7 @@ class RPC():
             time.sleep(0.1)
         AOIndex = int(AOIndex)
         wirteNum = int(wirteNum)
-        status = list(map(int, status))
+        status = list(map(float, status))
         flag = True
         while flag:
             try:
@@ -16875,7 +17038,7 @@ class RPC():
 
     @log_call
     @xmlrpc_timeout
-    def SerCoderCompenParams(self, status, torqueCoeff):
+    def SetCoderCompenParams(self, status, torqueCoeff):
         while self.reconnect_flag:
             time.sleep(0.1)
         status = int(status)
@@ -16883,7 +17046,7 @@ class RPC():
         flag = True
         while flag:
             try:
-                error = self.robot.SerCoderCompenParams(
+                error = self.robot.SetCoderCompenParams(
                     [status, torqueCoeff[0], torqueCoeff[1], torqueCoeff[2], torqueCoeff[3], torqueCoeff[4],
                      torqueCoeff[5]])
                 flag = False
@@ -17031,7 +17194,7 @@ class RPC():
 
     """
     @brief 光电传感器TCP标定
-    @param  [in] 必选参数 luaPath 自动标定lua程序路径：QX版本机器人-"/fruser/FR_CalibrateTheToolTcp.lua";LA版本机器人-"/usr/local/etc/controller/lua/FR_CalibrateTheToolTcp.lua"
+    @param  [in] 必选参数 luaFile 自动标定lua程序名称：如"FR_CalibrateTheToolTcp.lua"
     @param  [in] 必选参数 offsetX 示教点偏移(x,y,z)mm
     @return 错误码 成功- 0, 失败-错误码
     @return 返回值（调用成功返回） TCP 工具XYZ数值
@@ -17039,10 +17202,10 @@ class RPC():
 
     @log_call
     @xmlrpc_timeout
-    def PhotoelectricSensorTCPCalibration(self, luaPath, offsetX):
+    def PhotoelectricSensorTCPCalibration(self, luaFile, offsetX):
         while self.reconnect_flag:
             time.sleep(0.1)
-        luaPath = str(luaPath)
+        luaFile = str(luaFile)
         offsetX = list(map(float, offsetX))
         flag = True
         while flag:
@@ -17059,7 +17222,7 @@ class RPC():
                 _error = self.Mode(0)
                 if _error != 0:
                     return _error
-                _error = self.ProgramLoad(luaPath)
+                _error = self.ProgramLoad(luaFile)
                 if _error != 0:
                     return _error
                 _error = self.ProgramRun()
@@ -18067,11 +18230,12 @@ class RPC():
                 exis_vel_str = ",".join(["{:.3f}".format(v) for v in exis_vel])
 
                 # 构建命令字符串
-                cmd_str = f"ServoJV({joint_vel_str},{exis_vel_str},{acc:.3f},{vel:.3f},{cmdT:.3f},{filterT:.3f},{gain:.3f},{id})"
+                cmd_str = f"ServoJV({{{joint_vel_str}}},{{{exis_vel_str}}},{acc:.3f},{vel:.3f},{cmdT:.3f},{filterT:.3f},{gain:.3f},{id})"
 
                 # 构建UDP帧数据
                 content_len = len(cmd_str)
-                cmd_id = 1337
+                #cmd_id = 1337
+                cmd_id = 376
                 udp_data = f"/f/bIII{count}III{cmd_id}III{content_len}III{cmd_str}III/b/f"
 
                 success = self.SendUDPFrame(udp_data)
@@ -18231,11 +18395,12 @@ class RPC():
                 torque_ff_str = ",".join(["{:.3f}".format(v) for v in torque_ff])
 
                 # 构建命令字符串
-                cmd_str = f"ServoMIT({posGain_str},{desPos_str},{velGain_str},{desVel_str},{torque_ff_str},{interval:.3f})"
+                cmd_str = f"ServoMIT({{{posGain_str}}},{{{desPos_str}}},{{{velGain_str}}},{{{desVel_str}}},{{{torque_ff_str}}},{interval:.3f})"
 
                 # 构建UDP帧数据
                 content_len = len(cmd_str)
-                cmd_id = 1336
+                cmd_id = 376
+                # cmd_id = 1336
                 udp_data = f"/f/bIII{count}III{cmd_id}III{content_len}III{cmd_str}III/b/f"
 
                 success = self.SendUDPFrame(udp_data)
@@ -18655,3 +18820,300 @@ class RPC():
             return error, axisType, axisDirection, axisMax, axisMin, axisVel, axisAcc, axisLead, encResolution, axisOffect, axisCompany, axisModel, axisEncType
         else:
             return error, None, None, None, None, None, None, None, None, None, None, None, None
+
+    """
+    @brief 控制灵巧手运动
+    @param [in] idstart 起始从站号
+    @param [in] slaveNum 数量
+    @param [in] pos[16] 位置(-360~360)
+    @param [in] speed[16] 速度百分比，范围[0~100]
+    @param [in] force[16] 力矩百分比，范围[0~100]
+    @param [in] max_time 最大等待时间，范围[0~30000]，单位ms
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetDexterousHandsMove(self, idstart, slaveNum, pos, speed, force, max_time):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+
+        idstart = int(idstart)
+        slaveNum = int(slaveNum)
+        pos = list(map(float, pos))
+        speed = list(map(int, speed))
+        force = list(map(int, force))
+        max_time = int(max_time)
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.SetDexterousHandsMove(idstart, slaveNum, pos, speed, force, max_time)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        return error
+
+    """
+    @brief 控制灵巧手复位激活
+    @param [in] id 从站号
+    @param [in] act 0-复位 1-激活
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetDexterousHandsAct(self, id, act):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+
+        id = int(id)
+        act = int(act)
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.SetDexterousHandsAct(id, act)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        return error
+
+    """
+    @brief 清除灵巧手错误
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def ClearDexterousHandsError(self):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.ClearDexterousHandsError()
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        return error
+
+    """
+    @brief 设置启用灵巧手动作控制功能
+    @param [in] id 灵巧手从站编号
+    @param [in] func 功能数组，32个元素
+        0-夹持触发、1-夹爪初始化、2-位置设置、3-速度设置、4-力矩设置、
+        6-读夹爪状态、7-读初始化状态、8-读故障码、9-读位置、10-读速度、
+        11-读力矩、12-旋转圈数设置、13-旋转速度设置、14-旋转力矩设置、
+        15-读旋转夹爪状态、16-读旋转初始化状态、17-读旋转圈数、18-读旋转速度、
+        19-读旋转力矩、20-多轴同步运动设置、21-故障清除指令、22-单轴运行状态、
+        23-所有轴运行状态
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetDexterousHandsFunc(self, id, func):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        id = int(id)
+        func = list(map(int, func))
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.SetDexterousHandsFunc(id, func)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        return error
+
+    """
+    @brief 获取启用灵巧手动作控制功能
+    @param [in] id 灵巧手设备编号
+    @param [out] func 功能数组，32个元素
+        0-夹持触发、1-夹爪初始化、2-位置设置、3-速度设置、4-力矩设置、
+        6-读夹爪状态、7-读初始化状态、8-读故障码、9-读位置、10-读速度、
+        11-读力矩、12-旋转圈数设置、13-旋转速度设置、14-旋转力矩设置、
+        15-读旋转夹爪状态、16-读旋转初始化状态、17-读旋转圈数、18-读旋转速度、
+        19-读旋转力矩、20-多轴同步运动设置、21-故障清除指令、22-单轴运行状态、
+        23-所有轴运行状态
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def GetDexterousHandsFunc(self, id):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        id = int(id)
+
+        flag = True
+        while flag:
+            try:
+                _error = self.robot.GetDexterousHandsFunc(id)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        error = _error[0]
+        if error == 0:
+            resultStr = str(_error[1])
+            parS = resultStr.split(',')
+            if len(parS) != 32:
+                self.log_error("GetDexterousHandsFunc fail")
+                return error, None
+            func = [int(p) for p in parS]
+            return error, func
+        else:
+            self.log_error(f"execute GetDexterousHandsFunc fail {error}")
+            return error, None
+    """
+    @brief 设置摆动结束回周期零点
+    @param [in] flag 摆动结束是否回周期零点；0-不回周期零点；1-回周期零点
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetWeaveBackCenterConfig(self, flag):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        flag = int(flag)
+
+        flag_tmp = True
+        while flag_tmp:
+            try:
+                error = self.robot.SetWeaveBackCenterConfig(flag)
+                flag_tmp = False
+            except socket.error as e:
+                flag_tmp = True
+
+        if error != 0:
+            self.log_error(f"execute SetWeaveBackCenterConfig fail: {error}.")
+
+        return error
+
+    """
+    @brief 获取摆动结束回周期零点参数
+    @param [out] flag 摆动结束是否回周期零点；0-不回周期零点；1-回周期零点
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def GetWeaveBackCenterConfig(self):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        flag_tmp = True
+        while flag_tmp:
+            try:
+                _error = self.robot.GetWeaveBackCenterConfig()
+                flag_tmp = False
+            except socket.error as e:
+                flag_tmp = True
+
+        error = _error[0]
+        if error == 0:
+            flag = int(_error[1])
+            return error, flag
+        else:
+            self.log_error(f"execute GetWeaveBackCenterConfig fail {error}")
+            return error, None
+
+    """
+    @brief 实时设置速度(指令帧，低延迟)
+    @param [in] vel 速度百分比，范围[0~100]
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetSpeedInstant(self, vel):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+
+        vel = int(vel)
+
+        try:
+            # 获取下一个计数
+            count = self._get_next_udp_count()
+
+            # 构建命令字符串
+            cmd_str = f"SetSpeed({vel})"
+            content_len = len(cmd_str)
+
+            # 构建UDP帧数据
+            cmd_id = 983
+            udp_data = f"/f/bIII{count}III{cmd_id}III{content_len}III{cmd_str}III/b/f"
+
+            # 通过UDP发送
+            success = self.SendUDPFrame(udp_data)
+
+            if success:
+                return 0
+            else:
+                return RobotError.ERR_SOCKET_SEND_FAILED
+        except Exception as e:
+            self.log_error(f"SetSpeedInstant UDP send failed: {e}")
+            return RobotError.ERR_SOCKET_SEND_FAILED
+
+    """
+    @brief 设置摆动实时偏移
+    @param [in] offset 实时偏移量[x,y,z,rx,ry,rz]，单位[mm，°]
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetWeaveOffsetRT(self, offset):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+
+        offset = list(map(float, offset))
+
+        try:
+            # 获取下一个计数
+            count = self._get_next_udp_count()
+
+            # 构建命令字符串
+            cmd_str = f"SetWeaveOffsetRT({offset[0]:f},{offset[1]:f},{offset[2]:f},{offset[3]:f},{offset[4]:f},{offset[5]:f})"
+
+            # 构建UDP帧数据
+            cmd_id = 1368
+            udp_data = f"/f/bIII{count}III{cmd_id}III{len(cmd_str)}III{cmd_str}III/b/f"
+
+            # 通过UDP发送
+            success = self.SendUDPFrame(udp_data)
+
+            if success:
+                return 0
+            else:
+                return RobotError.ERR_SOCKET_SEND_FAILED
+        except Exception as e:
+            self.log_error(f"SetWeaveOffsetRT UDP send failed: {e}")
+            return RobotError.ERR_SOCKET_SEND_FAILED

@@ -133,7 +133,7 @@ def test1_cnde_config_and_data():
         RobotState.ToolCurPos,    # 工具(TCP)当前位置
     ]
 
-    rtn = SetRobotRealtimeStateConfig(custom_states, 20)
+    rtn = SetRobotRealtimeStateConfig(custom_states, 4)
     if rtn != 0:
         print(f"✗ 配置设置失败，错误码: {rtn}")
         return None
@@ -143,7 +143,8 @@ def test1_cnde_config_and_data():
     print(f"\n【步骤2】建立RPC连接 ({ROBOT_IP})...")
     robot = Robot.RPC(ROBOT_IP)
     time.sleep(0.5)  # 等待连接和数据接收
-
+    while True:
+        time.sleep(1)
     # 验证配置
     config = robot.CNDEGetConfig()
     if config:
@@ -911,8 +912,8 @@ def test7_robot_fault_state():
 
 
 # 独立运行入口 (取消下面两行注释即可单独运行此测试)
-if __name__ == "__main__":
-    test7_robot_fault_state()
+# if __name__ == "__main__":
+#     test7_robot_fault_state()
 
 
 # ==================== Test8: 错误码测试 ====================

@@ -15,7 +15,7 @@ def TestServoJUDP(self):
 
     robot.SetUDPCmdRpyCallback(callback)
     # # 初始化关节位置和外部轴位置
-    j= [105, -108, 74, -66, -88.893, -1.621]
+    j= [-1.0, -108, 95, -0.5, -8.893, 17.621]
     offset_pos = [0, 0, 0, 0, 0, 0]
     epos = [0, 0, 0, 0]
     # # 移动到初始位置
@@ -37,11 +37,11 @@ def TestServoJUDP(self):
         print(f"GetActualJointPosDegree errcode:{ret}")
     while 1:
         count = 300
-        result = robot.ServoMoveStart(cmdType=1)
+        result = robot.ServoMoveStart(cmdType=0)
         print("ServoMoveStart返回结果: {}".format(result))
         while count > 0:
             result = robot.ServoJ(joint_pos=j, axisPos=epos, acc=acc, vel=vel, cmdT=cmdT,
-                         filterT=filterT, gain=gain, id=cmdID, cmdType=1)
+                         filterT=filterT, gain=gain, id=cmdID, cmdType=0)
             j[0] += dt
             j[1] += dt
             j[2] += dt
@@ -52,15 +52,15 @@ def TestServoJUDP(self):
             count -= 1
             print("返回结果: {}".format(result))
             time.sleep(0.01)
-        result = robot.ServoMoveEnd(cmdType=1)
+        result = robot.ServoMoveEnd(cmdType=0)
         print("ServoMoveEnd返回结果: {}".format(result))
 
         count = 300
-        result = robot.ServoMoveStart(cmdType=1)
+        result = robot.ServoMoveStart(cmdType=0)
         print("ServoMoveStart返回结果: {}".format(result))
         while count > 0:
             result = robot.ServoJ(joint_pos=j, axisPos=epos, acc=acc, vel=vel, cmdT=cmdT,
-                         filterT=filterT, gain=gain, id=cmdID, cmdType=1)
+                         filterT=filterT, gain=gain, id=cmdID, cmdType=0)
             j[0] -= dt
             j[1] -= dt
             j[2] -= dt
@@ -71,7 +71,7 @@ def TestServoJUDP(self):
             count -= 1
             print("ServoJ返回结果: {}".format(result))
             time.sleep(0.01)
-        result = robot.ServoMoveEnd(cmdType=1)
+        result = robot.ServoMoveEnd(cmdType=0)
         print("ServoMoveEnd返回结果: {}".format(result))
     robot.CloseRPC()
     return 0
@@ -210,6 +210,6 @@ def TestSendUDPFrame(self):
     robot.CloseRPC()
     time.sleep(1)
 
-TestServoJUDP(robot)
+# TestServoJUDP(robot)
 #TestServoJTUDP(robot)
 # TestSendUDPFrame(robot)
