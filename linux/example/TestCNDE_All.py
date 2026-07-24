@@ -126,7 +126,7 @@ def test1_cnde_config_and_data():
     # ===== 步骤1: 设置CNDE配置 (JointCurPos, ToolCurPos, 20ms) =====
     print("\n【步骤1】设置CNDE配置...")
     print("  配置字段: JointCurPos, ToolCurPos")
-    print("  反馈周期: 20ms")
+    print("  反馈周期: 4ms")
 
     custom_states = [
         RobotState.JointCurPos,   # 关节当前位置
@@ -143,9 +143,6 @@ def test1_cnde_config_and_data():
     print(f"\n【步骤2】建立RPC连接 ({ROBOT_IP})...")
     robot = Robot.RPC(ROBOT_IP)
     time.sleep(0.5)  # 等待连接和数据接收
-    while True:
-        time.sleep(1)
-    # 验证配置
     config = robot.CNDEGetConfig()
     if config:
         states, period = config
@@ -153,6 +150,8 @@ def test1_cnde_config_and_data():
     else:
         print("✗ 无法获取CNDE配置")
         return robot
+    while True:
+        time.sleep(1)
 
     # ===== 步骤3: 打印机器人关节和TCP位姿 =====
     print("\n【步骤3】打印机器人关节和TCP位姿...")
@@ -229,8 +228,8 @@ def test1_cnde_config_and_data():
 
 
 # 独立运行入口 (取消下面两行注释即可单独运行此测试)
-# if __name__ == "__main__":
-#     test1_cnde_config_and_data()
+if __name__ == "__main__":
+    test1_cnde_config_and_data()
 
 
 # ==================== Test2: Add/Delete 状态字段测试 ====================

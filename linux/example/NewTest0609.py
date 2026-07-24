@@ -710,8 +710,8 @@ def TestExtCoord(self):
     rtn,coordRtn = robot.ComputeExTCF()
     print(f"ComputeExTCF {rtn}  coord is {coordRtn[0]} {coordRtn[1]} {coordRtn[2]} {coordRtn[3]} {coordRtn[4]} {coordRtn[5]}")
 
-    robot.SetExToolCoord(1, coordRtn, offdese)
-    robot.SetExToolList(1, coordRtn, offdese)
+    robot.SetExToolCoord(21, coordRtn, offdese)
+    robot.SetExToolList(21, coordRtn, offdese)
 
     robot.CloseRPC()
 
@@ -1212,17 +1212,17 @@ def TestLUAUpDownLoad(self):
     for name in luaNames:
         print(name)
 
-    # 下载lua
-    rtn = robot.LuaDownLoad("test0610.lua", "D://zDOWN/")
-    print(f"LuaDownLoad rtn is:{rtn}")
-
-    # 上传lua
-    rtn = robot.LuaUpload("D://zDOWN/test0610.lua")
-    print(f"LuaUpload rtn is:{rtn}")
-
-    # 删除lua
-    rtn = robot.LuaDelete("test0610.lua")
-    print(f"LuaDelete rtn is:{rtn}")
+    # # 下载lua
+    # rtn = robot.LuaDownLoad("test0610.lua", "D://zDOWN/")
+    # print(f"LuaDownLoad rtn is:{rtn}")
+    #
+    # # 上传lua
+    # rtn = robot.LuaUpload("D://zDOWN/test0610.lua")
+    # print(f"LuaUpload rtn is:{rtn}")
+    #
+    # # 删除lua
+    # rtn = robot.LuaDelete("test0610.lua")
+    # print(f"LuaDelete rtn is:{rtn}")
 
     robot.CloseRPC()
 
@@ -1476,12 +1476,10 @@ def TestSetWeldParam(self):
     end_time = 0
 
     error, start_current, start_voltage, start_time, weld_current, weld_voltage, end_current,end_voltage, end_time = robot.WeldingGetProcessParam(1)
-    print(
-        f"the Num 1 process param is {start_current} {start_voltage} {start_time} {weld_current} {weld_voltage} {end_current} {end_voltage} {end_time}")
+    print(f"the Num 1 process param is {start_current} {start_voltage} {start_time} {weld_current} {weld_voltage} {end_current} {end_voltage} {end_time}")
 
     error, start_current, start_voltage, start_time, weld_current, weld_voltage, end_current,end_voltage, end_time = robot.WeldingGetProcessParam(2)
-    print(
-        f"the Num 2 process param is {start_current} {start_voltage} {start_time} {weld_current} {weld_voltage} {end_current} {end_voltage} {end_time}")
+    print(f"the Num 2 process param is {start_current} {start_voltage} {start_time} {weld_current} {weld_voltage} {end_current} {end_voltage} {end_time}")
 
     rtn = robot.WeldingSetCurrentRelation(0, 400, 0, 10, 0)
     print(f"WeldingSetCurrentRelation rtn is: {rtn}")
@@ -1544,8 +1542,12 @@ def TestSetWeldParam(self):
     robot.SetWeldMachineCtrlModeExtDoNum(17)
     for i in range(5):
         robot.SetWeldMachineCtrlMode(0,1)
+        error,getCtrlMode=robot.GetWeldMachineCtrlMode
+        print(f"GetWeldMachineCtrlMode = {getCtrlMode}")
         time.sleep(1)
         robot.SetWeldMachineCtrlMode(1,1)
+        error, getCtrlMode = robot.GetWeldMachineCtrlMode
+        print(f"GetWeldMachineCtrlMode = {getCtrlMode}")
         time.sleep(1)
 
     robot.CloseRPC()
@@ -1739,23 +1741,58 @@ def TestDownLoadRobotData(self):
     robot.CloseRPC()
 
 def TestExtDIConfig(self):
+    # ========== 设置扩展IO配置 ==========
+    # 设置扩展DO功能
     rtn = robot.SetArcStartExtDoNum(10)
     print(f"SetArcStartExtDoNum rtn is {rtn}")
+
     rtn = robot.SetAirControlExtDoNum(20)
     print(f"SetAirControlExtDoNum rtn is {rtn}")
+
     rtn = robot.SetWireForwardFeedExtDoNum(30)
     print(f"SetWireForwardFeedExtDoNum rtn is {rtn}")
-    rtn = robot.SetWireReverseFeedExtDoNum(40)
 
+    rtn = robot.SetWireReverseFeedExtDoNum(40)
+    print(f"SetWireReverseFeedExtDoNum rtn is {rtn}")
+
+    # 设置扩展DI功能
     rtn = robot.SetWeldReadyExtDiNum(50)
     print(f"SetWeldReadyExtDiNum rtn is {rtn}")
+
     rtn = robot.SetArcDoneExtDiNum(60)
     print(f"SetArcDoneExtDiNum rtn is {rtn}")
+
     rtn = robot.SetExtDIWeldBreakOffRecover(70, 80)
     print(f"SetExtDIWeldBreakOffRecover rtn is {rtn}")
+
     rtn = robot.SetWireSearchExtDIONum(0, 1)
     print(f"SetWireSearchExtDIONum rtn is {rtn}")
 
+    # ========== 获取扩展DI配置 ==========
+    rtn, DIConfig = robot.GetExtDIConfig()
+    print(f"GetExtDIConfig rtn is {rtn}")
+    print(f"welder ready {DIConfig[0]}")
+    print(f"arc done {DIConfig[1]}")
+    print(f"reweld start {DIConfig[2]}")
+    print(f"abort reweld {DIConfig[3]}")
+    print(f"wiresearch done {DIConfig[4]}")
+    print(f"Laser welding State {DIConfig[5]}")
+    print(f"laser welding error state {DIConfig[6]}")
+
+    # ========== 获取扩展DO配置 ==========
+    rtn, DOConfig = robot.GetExtDOConfig()
+    print(f"GetExtDOConfig rtn is {rtn}")
+    print(f"Arc Start {DOConfig[0]}")
+    print(f"Air Test {DOConfig[1]}")
+    print(f"Wire forward {DOConfig[2]}")
+    print(f"Wire Inverse {DOConfig[3]}")
+    print(f"wiresearch {DOConfig[4]}")
+    print(f"Weld Mode {DOConfig[5]}")
+    print(f"laser Enable {DOConfig[6]}")
+    print(f"Laser On {DOConfig[7]}")
+    print(f"Laser Reset Error {DOConfig[8]}")
+
+    # 关闭连接
     robot.CloseRPC()
 
 
@@ -3284,13 +3321,13 @@ def TestRotInsert(self):
 # TestAxleSensor(robot)
 # TestExDevProtocol(robot)
 # TestAxleLua(robot)
-# TestSetWeldParam(robot)
+TestSetWeldParam(robot)
 # TestWelding(robot)
 # TestSegWeld(robot)
 # TestWeave(robot)
 # TestExtDIConfig(robot)
 # TestArcWeldTrace(robot)
-TestWireSearch(robot)
+# TestWireSearch(robot)
 # TestSSHMd5(robot)
 # TestRealtimePeriod(robot)
 # TestUpgrade(robot)
