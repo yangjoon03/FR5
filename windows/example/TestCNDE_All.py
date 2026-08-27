@@ -228,8 +228,8 @@ def test1_cnde_config_and_data():
 
 
 # 独立运行入口 (取消下面两行注释即可单独运行此测试)
-if __name__ == "__main__":
-    test1_cnde_config_and_data()
+# if __name__ == "__main__":
+#     test1_cnde_config_and_data()
 
 
 # ==================== Test2: Add/Delete 状态字段测试 ====================
@@ -554,7 +554,7 @@ def test4_robot_runtime_state():
 
     sample_count = 0
     try:
-        while sample_count < 500:  # 采集500个样本
+        while sample_count < 100:  # 采集500个样本
             pkg = robot.robot_state_pkg
 
             # 每50帧打印一次
@@ -588,8 +588,8 @@ def test4_robot_runtime_state():
 
 
 # 独立运行入口 (取消下面两行注释即可单独运行此测试)
-# if __name__ == "__main__":
-#     test4_robot_runtime_state()
+if __name__ == "__main__":
+    test4_robot_runtime_state()
 
 
 # ==================== Test5: 机器人外设状态反馈测试 ====================

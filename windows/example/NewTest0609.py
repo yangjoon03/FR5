@@ -33,6 +33,14 @@ def TestRobotCtrl(self):
     robot.Mode(0)
     time.sleep(1)
     robot.Mode(1)
+    time.sleep(1)
+    rtn = robot.HiSpeedManualSwitch(1)
+    print(f"change high speed mode : {rtn}")
+    time.sleep(1)
+    rtn = robot.HiSpeedManualSwitch(0)
+    print(f"change low speed mode : {rtn}")
+    time.sleep(3)
+    robot.ShutDownRobotOS()
     # print("\nPress any key to exit!")
     robot.CloseRPC()
 
@@ -1702,7 +1710,7 @@ def TestRealtimePeriod(self):
 
 
 def TestUpgrade(self):
-    error = robot.SoftwareUpgrade("E://项目相关资料/SDK版本兼容/software.tar.gz", False)
+    error = robot.SoftwareUpgrade("C://Users/lenovo/Desktop/software.tar.gz", False)
     print(f"SoftwareUpgrade error is {error}")
     while True:
         curState = robot.GetSoftwareUpgradeState()
@@ -3275,7 +3283,7 @@ def TestRotInsert(self):
 
 
 ###6.9
-# TestRobotCtrl(robot)
+TestRobotCtrl(robot)
 # TestGetVersions(robot)
 # TestJOG(robot)
 # TestMove(robot)
@@ -3321,7 +3329,7 @@ def TestRotInsert(self):
 # TestAxleSensor(robot)
 # TestExDevProtocol(robot)
 # TestAxleLua(robot)
-TestSetWeldParam(robot)
+# TestSetWeldParam(robot)
 # TestWelding(robot)
 # TestSegWeld(robot)
 # TestWeave(robot)

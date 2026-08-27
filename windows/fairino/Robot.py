@@ -17,6 +17,7 @@ from ctypes import *
 from typing import Optional
 from typing import Callable, Optional, List, Tuple, Dict
 from dataclasses import dataclass
+import datetime
 
 # from Cython.Compiler.Options import error_on_unknown_names
 
@@ -1538,7 +1539,7 @@ class FRCNDEClient:
             self._port = port
 
         self._tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._tcp_socket.settimeout(3.0)
+        self._tcp_socket.settimeout(5.0)
 
         try:
             self._tcp_socket.connect((self._ip, self._port))
@@ -1668,10 +1669,9 @@ class FRCNDEClient:
             return -1
 
         pkg_buf = bytearray(CNDE_MAX_PKG_SIZE)
-        timeout_count = 5
-
+        timeout_count = 10
         while self._robot_state_run_flag and timeout_count > 0:
-            recv_len = self._recv_data(pkg_buf, 0.1)
+            recv_len = self._recv_data(pkg_buf, 1)
             if recv_len < 0:
                 self._sock_com_err[0] = self.ERR_SOCKET_COM_FAILED
                 return -1
@@ -1728,10 +1728,10 @@ class FRCNDEClient:
             return -1
 
         pkg_buf = bytearray(CNDE_MAX_PKG_SIZE)
-        timeout_count = 50
+        timeout_count = 10
 
         while self._robot_state_run_flag and timeout_count > 0:
-            recv_len = self._recv_data(pkg_buf, 0.1)
+            recv_len = self._recv_data(pkg_buf, 1)
             if recv_len < 0:
                 self._sock_com_err[0] = self.ERR_SOCKET_COM_FAILED
                 return -1
@@ -1781,10 +1781,10 @@ class FRCNDEClient:
                 return -1
 
             pkg_buf = bytearray(CNDE_MAX_PKG_SIZE)
-            timeout_count = 30
+            timeout_count = 10
 
             while self._robot_state_run_flag and timeout_count > 0:
-                recv_len = self._recv_data(pkg_buf, 0.1)
+                recv_len = self._recv_data(pkg_buf, 1)
                 if recv_len < 0:
                     return -1
                 elif recv_len == 0:
@@ -2752,7 +2752,7 @@ class RPC():
             time.sleep(0.1)
 
         error = 0
-        sdk = ["SDK:V2.2.7", "Robot:V3.9.7"]
+        sdk = ["SDK:V2.2.8", "Robot:V3.9.9"]
         return error, sdk
 
     """   
@@ -3707,12 +3707,19 @@ class RPC():
             flag = True
             while flag:
                 try:
-                    error = self.robot.ServoJ(joint_pos, axisPos, acc, vel, cmdT, filterT, gain, id)
+                    _result = self.robot.ServoJ(joint_pos, axisPos, acc, vel, cmdT, filterT, gain, id)
                     flag = False
                 except socket.error as e:
                     flag = True
-            return error
 
+            if isinstance(_result, (list, tuple)):
+                error = int(_result[0])
+            else:
+                error = int(_result)
+
+            if error != 0:
+                self.log_error(f"execute ServoJ fail: {error}.")
+            return error
         elif cmdType == 1:
             # 使用UDP透传接口
             try:
@@ -3757,6 +3764,122 @@ class RPC():
         else:
             print("不支持的cmdType: {}".format(cmdType))
             return RobotError.ERR_PARAM_VALUE
+
+    """
+    @brief 关节空间伺服模式运动(支持多点位一次输入)
+    @param [in] joint_pos 目标关节位置集合(最多支持10组),单位deg，二维列表，每个元素为6个关节位置
+    @param [in] axisPos 外部轴位置,单位mm，4个元素
+    @param [in] acc 加速度百分比，范围[0~100],暂不开放，默认为0.0
+    @param [in] vel 速度百分比，范围[0~100]，暂不开放，默认为0.0
+    @param [in] cmdT 指令下发周期，单位s，建议范围[0.001~0.0016]，默认为0.008
+    @param [in] filterT 滤波时间，单位s，暂不开放，默认为0.0
+    @param [in] gain 目标位置的比例放大器，暂不开放，默认为0.0
+    @param [in] id servoJ指令ID,默认为0
+    @param [in] cmdType 命令传输类型，0=XML-RPC，1=UDP透传
+    @return 错误码 成功-0  失败-错误码
+    @return servoJCmdCount ServoJ指令点位计数[0-10000] (仅XML-RPC方式返回)
+    """
+    @log_call
+    @xmlrpc_timeout
+    def ServoJMultiPos(self, joint_pos, axisPos, acc=0.0, vel=0.0, cmdT=0.008, filterT=0.0, gain=0.0, id=0, cmdType=0):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        # 安全检查
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+
+        # 参数校验：点位数量不能超过10组，且不能为0
+        if len(joint_pos) > 10 or len(joint_pos) == 0:
+            self.log_error("ServoJMultiPos fail: joint_pos size must be 1-10")
+            return RobotError.ERR_PARAM_VALUE, 0
+
+        # 参数类型转换
+        joint_pos = [list(map(float, pos)) for pos in joint_pos]
+        axisPos = list(map(float, axisPos))
+        acc = float(acc)
+        vel = float(vel)
+        cmdT = float(cmdT)
+        filterT = float(filterT)
+        gain = float(gain)
+        id = int(id)
+
+        if cmdType == 0:
+            # XML-RPC方式
+            # 构建param[0]: 所有关节位置展开
+            param0 = []
+            for pos in joint_pos:
+                param0.extend(pos)
+
+            # 构建param[1]: 外部轴位置
+            param1 = axisPos
+
+            flag = True
+            while flag:
+                try:
+                    # 注意：传入8个独立参数，而不是一个数组
+                    _result = self.robot.ServoJ(param0, param1, acc, vel, cmdT, filterT, gain, id)
+                    flag = False
+                except socket.error as e:
+                    flag = True
+
+            # 判断返回结果
+            if isinstance(_result, (list, tuple)):
+                error = int(_result[0])
+                if len(_result) > 1:
+                    servoJCmdCount = int(_result[1])
+                else:
+                    servoJCmdCount = 0
+            else:
+                error = int(_result)
+                servoJCmdCount = 0
+
+            if error != 0:
+                self.log_error(f"execute ServoJMultiPos fail: {error}.")
+            return error, servoJCmdCount
+
+        elif cmdType == 1:
+            # UDP方式
+            try:
+                count = self._get_next_udp_count()
+
+                # 构建关节位置字符串: {x,y,z,rx,ry,rz},{x,y,z,rx,ry,rz},...
+                joint_str_parts = []
+                for pos in joint_pos:
+                    joint_str_parts.append("{" + ",".join(["{:.3f}".format(j) for j in pos]) + "}")
+                joint_str = ",".join(joint_str_parts)
+
+                # 构建外部轴字符串: {a1,a2,a3,a4}
+                axis_str = "{" + ",".join(["{:.3f}".format(a) for a in axisPos]) + "}"
+
+                # 构建完整命令
+                cmd_str = "ServoJ({},{},{},{},{},{},{},{})".format(
+                    joint_str, axis_str,
+                    "{:.3f}".format(acc),
+                    "{:.3f}".format(vel),
+                    "{:.3f}".format(cmdT),
+                    "{:.3f}".format(filterT),
+                    "{:.3f}".format(gain),
+                    id
+                )
+
+                content_len = len(cmd_str)
+                cmd_id = 376
+                udp_data = f"/f/bIII{count}III{cmd_id}III{content_len}III{cmd_str}III/b/f"
+
+                success = self.SendUDPFrame(udp_data)
+                if success:
+                    return 0, 0
+                else:
+                    return RobotError.ERR_SOCKET_SEND_FAILED, 0
+
+            except Exception as e:
+                self.log_error(f"ServoJMultiPos UDP send failed: {e}")
+                return RobotError.ERR_SOCKET_SEND_FAILED, 0
+
+        else:
+            self.log_error(f"ServoJMultiPos invalid cmdType: {cmdType}")
+            return RobotError.ERR_PARAM_VALUE, 0
 
     """   
     @brief  笛卡尔空间伺服模式运动
@@ -7918,12 +8041,13 @@ class RPC():
     @param  [in] 默认参数 dr：每圈半径进给量，单位 mm 默认0.7
     @param  [in] 默认参数 max_t_ms：最大探索时间，单位 ms 默认 60000
     @param  [in] 默认参数 max_vel：线速度最大值，单位 mm/s 默认 5
+    @param  [in] 默认参数 strategy 未检测到力/力矩的处理策略，0-报错；1-警告，继续运动
     @return 错误码 成功- 0, 失败-错误码
     """
 
     @log_call
     @xmlrpc_timeout
-    def FT_SpiralSearch(self, rcs, ft, dr=0.7, max_t_ms=60000, max_vel=5):
+    def FT_SpiralSearch(self, rcs, ft, dr=0.7, max_t_ms=60000, max_vel=5, strategy = 0):
         while self.reconnect_flag:
             time.sleep(0.1)
         rcs = int(rcs)
@@ -7931,10 +8055,11 @@ class RPC():
         dr = float(dr)
         max_t_ms = float(max_t_ms)
         max_vel = float(max_vel)
+        strategy = int(strategy)
         flag = True
         while flag:
             try:
-                error = self.robot.FT_SpiralSearch(rcs, ft, dr, max_t_ms, max_vel)
+                error = self.robot.FT_SpiralSearch(rcs, ft, dr, max_t_ms, max_vel, strategy)
                 flag = False
             except socket.error as e:
                 flag = True
@@ -7985,12 +8110,13 @@ class RPC():
     @param  [in] 必选参数 linorn：插入方向:0-负方向，1-正方向
     @param  [in] 默认参数 lin_v：直线速度，单位 mm/s 默认1
     @param  [in] 默认参数 lin_a：直线加速度，单位 mm/s^2，暂不使用 默认1
+    @param  [in] 默认参数 strategy 未检测到力/力矩的处理策略，0-报错；1-警告，继续运动
     @return 错误码 成功- 0, 失败-错误码
     """
 
     @log_call
     @xmlrpc_timeout
-    def FT_LinInsertion(self, rcs, ft, disMax, linorn, lin_v=1.0, lin_a=1.0):
+    def FT_LinInsertion(self, rcs, ft, disMax, linorn, lin_v=1.0, lin_a=1.0, strategy = 0):
         while self.reconnect_flag:
             time.sleep(0.1)
         rcs = int(rcs)
@@ -7999,10 +8125,11 @@ class RPC():
         linorn = int(linorn)
         lin_v = float(lin_v)
         lin_a = float(lin_a)
+        strategy = int(strategy)
         flag = True
         while flag:
             try:
-                error = self.robot.FT_LinInsertion(rcs, ft, lin_v, lin_a, disMax, linorn)
+                error = self.robot.FT_LinInsertion(rcs, ft, lin_v, lin_a, disMax, linorn, strategy)
                 flag = False
             except socket.error as e:
                 flag = True
@@ -8065,12 +8192,13 @@ class RPC():
     @param  [in] 必选参数 ft：动作终止力阈值，单位 N
     @param  [in] 默认参数 lin_v：探索直线速度，单位 mm/s 默认3
     @param  [in] 默认参数 lin_a：探索直线加速度，单位 mm/s^2 默认0
+    @param  [in] 默认参数 strategy 未检测到力/力矩的处理策略，0-报错；1-警告，继续运动
     @return 错误码 成功- 0, 失败-错误码
     """
 
     @log_call
     @xmlrpc_timeout
-    def FT_FindSurface(self, rcs, dir, axis, disMax, ft, lin_v=3.0, lin_a=0.0):
+    def FT_FindSurface(self, rcs, dir, axis, disMax, ft, lin_v=3.0, lin_a=0.0, strategy = 0):
         while self.reconnect_flag:
             time.sleep(0.1)
         rcs = int(rcs)
@@ -8079,10 +8207,11 @@ class RPC():
         ft = float(ft)
         lin_v = float(lin_v)
         lin_a = float(lin_a)
+        strategy = int(strategy)
         flag = True
         while flag:
             try:
-                error = self.robot.FT_FindSurface(rcs, dir, axis, lin_v, lin_a, disMax, ft)
+                error = self.robot.FT_FindSurface(rcs, dir, axis, lin_v, lin_a, disMax, ft, strategy)
                 flag = False
             except socket.error as e:
                 flag = True
@@ -17348,8 +17477,7 @@ class RPC():
                 flag = True
         return error
 
-    """3.9.3"""
-    """2026.01.29"""
+
     """
     @brief 逆运动学求解，笛卡尔空间包含扩展轴位置
     @param  [in] 必选参数 type 0-绝对位姿(基坐标系)，1-增量位姿(基坐标系)，2-增量位姿(工具坐标系)
@@ -17357,13 +17485,14 @@ class RPC():
     @param  [in] 必选参数 exaxis 扩展轴位置
     @param  [in] 必选参数 tool 工具号
     @param  [in] 必选参数 workPiece 工件号
+    @param  [in] config -1：自动求解，0-7对应八组解
     @return 错误码 成功- 0, 失败-错误码
     @return 返回值（调用成功返回） joint_pos 关节位置
     """
 
     @log_call
     @xmlrpc_timeout
-    def GetInverseKinExaxis(self, type, desc_pos, exaxis, tool, workPiece):
+    def GetInverseKinExaxis(self, type, desc_pos, exaxis, tool, workPiece, config = -1):
         while self.reconnect_flag:
             time.sleep(0.1)
         type = int(type)
@@ -17371,6 +17500,7 @@ class RPC():
         exaxis = list(map(float, exaxis))
         tool = int(tool)
         workPiece = int(workPiece)
+        config = int(config)
         flag = True
         while flag:
             try:
@@ -17378,7 +17508,7 @@ class RPC():
                                                         [desc_pos[0], desc_pos[1], desc_pos[2],
                                                          desc_pos[3], desc_pos[4], desc_pos[5]],
                                                         [exaxis[0], exaxis[1], exaxis[2], exaxis[3]],
-                                                        tool, workPiece)
+                                                        tool, workPiece, config)
                 flag = False
             except socket.error as e:
                 flag = True
@@ -17619,12 +17749,13 @@ class RPC():
     """
     @brief 设置可配置CI端口功能
     @param [in] config CI0-CI7功能编码数组,0-无;1-起弧成功;2-焊机准备;3-传送带检测;4-暂停;5-恢复;6-启动;7-停止;
-      58-暂停/恢复;9-启动/停止;10-脚踏拖动;11-移至作业原点;12-手自动切换;
-      613-焊丝寻位成功;14-运动中断;15-启动主程序;16-启动倒带;17-启动确认;
-      718-光电检测信号X;19-光电检测信号Y;20-外部急停输入信号1;21-外部急停输入信号2;
-      822-一级缩减模式;23-二级缩减模式;24-三级缩减模式(停止);25-恢复焊接;26-终止焊接;
-      927-辅助拖动开启;28-辅助拖动关闭;29-辅助拖动开启/关闭;30-清除所有错误;
-      1031-手自动切换(高低电平);32-使能;33-去使能;34-使能/去使能(上升下降沿);35-定点跟踪开始/结束
+	 8-暂停/恢复;9-启动/停止;10-脚踏拖动;11-移至作业原点;12-手自动切换;
+	 13-焊丝寻位成功;14-运动中断;15-启动主程序;16-启动倒带;17-启动确认;
+	 18-光电检测信号X;19-光电检测信号Y;20-外部急停输入信号1;21-外部急停输入信号2;
+	 22-一级缩减模式;23-二级缩减模式;24-三级缩减模式(停止);25-恢复焊接;26-终止焊接;
+	 27-辅助拖动开启;28-辅助拖动关闭;29-辅助拖动开启/关闭;30-清除所有错误;
+	 31-手自动切换(高低电平);32-使能;33-去使能;34-使能/去使能(上升下降沿);35-定点跟踪开始/结束
+	 36-进入安全速度移动;37-电流环拖动锁定;38-力传感器辅助锁定
     @return 错误码
     """
 
@@ -17651,12 +17782,17 @@ class RPC():
     """
     @brief 获取控制箱可配置CI端口功能
     @param [out] config CI0-CI7功能编码数组,0-无;1-起弧成功;2-焊机准备;3-传送带检测;4-暂停;5-恢复;6-启动;7-停止;
-      58-暂停/恢复;9-启动/停止;10-脚踏拖动;11-移至作业原点;12-手自动切换;
-      613-焊丝寻位成功;14-运动中断;15-启动主程序;16-启动倒带;17-启动确认;
-      718-光电检测信号X;19-光电检测信号Y;20-外部急停输入信号1;21-外部急停输入信号2;
-      822-一级缩减模式;23-二级缩减模式;24-三级缩减模式(停止);25-恢复焊接;26-终止焊接;
-      927-辅助拖动开启;28-辅助拖动关闭;29-辅助拖动开启/关闭;30-清除所有错误;
-      1031-手自动切换(高低电平);32-使能;33-去使能;34-使能/去使能(上升下降沿);35-定点跟踪开始/结束
+	 8-暂停/恢复;9-启动/停止;10-脚踏拖动;11-移至作业原点;12-手自动切换;
+	 13-焊丝寻位成功;14-运动中断;15-启动主程序;16-启动倒带;17-启动确认;
+	 18-光电检测信号X;19-光电检测信号Y;20-外部急停输入信号1;21-外部急停输入信号2;
+	 22-一级缩减模式;23-二级缩减模式;24-三级缩减模式(停止);25-恢复焊接;26-终止焊接;
+	 27-辅助拖动开启;28-辅助拖动关闭;29-辅助拖动开启/关闭;30-清除所有错误;
+	 31-手自动切换(高低电平);32-使能;33-去使能;34-使能/去使能(上升下降沿);35-定点跟踪开始/结束;
+	 36-进入安全速度移动;37-电流环拖动锁定;38-力传感器辅助锁定
+	 201-外部急停输入信号1-双通道; 202-外部急停输入信号2-双通道; 203-一级缩减模式-双通道; 
+	 204-二级缩减模式-双通道; 205-三级缩减模式-双通道; 206-常规停止-双通道; 207-安全墙1-双通道; 208-安全墙2-双通道; 
+	 209-安全墙3-双通道; 210-安全墙4-双通道; 211-安全墙5-双通道; 212-安全墙6-双通道; 213-安全墙7-双通道;
+	 214-安全墙8-双通道; 215-安全停止重置-双通道;
     @return 错误码
     """
 
@@ -17684,15 +17820,15 @@ class RPC():
     """
     @brief 设置可配置CO端口功能
     @param [in] config CO0-CO7功能编码数组,0-无;1-机器人报错;2-机器人运动中;3-喷涂启停;4-喷涂清枪;5-送气信号;6-起弧信号;7-点动送丝;
-      58-反向送丝;9-JOB输入口1;10-JOB输入口2;11-JOB输入口3;12-传送带启停控制;13-机器人暂停中;14-到达作业原点;
-      615-到达干涉区;16-焊丝寻位启停控制;17-机器人启动完成;18-程序启动停止;19-自动手动模式;20-急停输出信号1-安全;
-      721-急停输出信号2-安全;22-LUA脚本程序运行停止;23-安全状态输出-安全;24-保护性停止状态输出-安全;
-      825-机器人运动中-安全;26-机器人缩减模式-安全;27-机器人非缩减模式-安全;28-机器人非停止;29-机器人报错-指令点错误;
-      930-机器人报错-驱动器错误;31-机器人报错-超出软限位错误;32-机器人报错-碰撞错误;33-机器人报错-活动从站数量错误;
-      1034-机器人报错-从站错误;35-机器人报错-IO错误;36-机器人报错-夹爪错误;37-机器人报错-文件错误;38-机器人报错-奇异位姿错误;
-      1139-机器人报错-驱动器通信错误;40-机器人报错-参数错误;41-机器人报错-外部轴超出软限位错误;42-机器人警告-警告;
-      1243-机器人警告-安全门警告;44-机器人警告-运动警告;45-机器人警告-干涉区警告;46-机器人警告-安全墙警告;
-      1347-使能状态;48-断线自动抬升中;49-立方体1干涉警告;50-立方体2干涉警告;51-立方体3干涉警告;52-立方体4干涉警告;
+		8-反向送丝;9-JOB输入口1;10-JOB输入口2;11-JOB输入口3;12-传送带启停控制;13-机器人暂停中;14-到达作业原点;
+		15-到达干涉区;16-焊丝寻位启停控制;17-机器人启动完成;18-程序启动停止;19-自动手动模式;20-急停输出信号1-安全;
+		21-急停输出信号2-安全;22-LUA脚本程序运行停止;23-安全状态输出-安全;24-保护性停止状态输出-安全;
+		25-机器人运动中-安全;26-机器人缩减模式-安全;27-机器人非缩减模式-安全;28-机器人非停止;29-机器人报错-指令点错误;
+		30-机器人报错-驱动器错误;31-机器人报错-超出软限位错误;32-机器人报错-碰撞错误;33-机器人报错-活动从站数量错误;
+		34-机器人报错-从站错误;35-机器人报错-IO错误;36-机器人报错-夹爪错误;37-机器人报错-文件错误;38-机器人报错-奇异位姿错误;
+		39-机器人报错-驱动器通信错误;40-机器人报错-参数错误;41-机器人报错-外部轴超出软限位错误;42-机器人警告-警告;
+		43-机器人警告-安全门警告;44-机器人警告-运动警告;45-机器人警告-干涉区警告;46-机器人警告-安全墙警告;
+		47-使能状态;48-断线自动抬升中;49-立方体1干涉警告;50-立方体2干涉警告;51-立方体3干涉警告;52-立方体4干涉警告;
     @return 错误码
     """
 
@@ -17718,15 +17854,17 @@ class RPC():
     """
     @brief 获取可配置CO端口功能
     @param [out] config CO0-CO7功能编码数组,0-无;1-机器人报错;2-机器人运动中;3-喷涂启停;4-喷涂清枪;5-送气信号;6-起弧信号;7-点动送丝;
-      58-反向送丝;9-JOB输入口1;10-JOB输入口2;11-JOB输入口3;12-传送带启停控制;13-机器人暂停中;14-到达作业原点;
-      615-到达干涉区;16-焊丝寻位启停控制;17-机器人启动完成;18-程序启动停止;19-自动手动模式;20-急停输出信号1-安全;
-      721-急停输出信号2-安全;22-LUA脚本程序运行停止;23-安全状态输出-安全;24-保护性停止状态输出-安全;
-      825-机器人运动中-安全;26-机器人缩减模式-安全;27-机器人非缩减模式-安全;28-机器人非停止;29-机器人报错-指令点错误;
-      930-机器人报错-驱动器错误;31-机器人报错-超出软限位错误;32-机器人报错-碰撞错误;33-机器人报错-活动从站数量错误;
-      1034-机器人报错-从站错误;35-机器人报错-IO错误;36-机器人报错-夹爪错误;37-机器人报错-文件错误;38-机器人报错-奇异位姿错误;
-      1139-机器人报错-驱动器通信错误;40-机器人报错-参数错误;41-机器人报错-外部轴超出软限位错误;42-机器人警告-警告;
-      1243-机器人警告-安全门警告;44-机器人警告-运动警告;45-机器人警告-干涉区警告;46-机器人警告-安全墙警告;
-      1347-使能状态;48-断线自动抬升中;49-立方体1干涉警告;50-立方体2干涉警告;51-立方体3干涉警告;52-立方体4干涉警告;
+		8-反向送丝;9-JOB输入口1;10-JOB输入口2;11-JOB输入口3;12-传送带启停控制;13-机器人暂停中;14-到达作业原点;
+		15-到达干涉区;16-焊丝寻位启停控制;17-机器人启动完成;18-程序启动停止;19-自动手动模式;20-急停输出信号1-安全;
+		21-急停输出信号2-安全;22-LUA脚本程序运行停止;23-安全状态输出-安全;24-保护性停止状态输出-安全;
+		25-机器人运动中-安全;26-机器人缩减模式-安全;27-机器人非缩减模式-安全;28-机器人非停止;29-机器人报错-指令点错误;
+		30-机器人报错-驱动器错误;31-机器人报错-超出软限位错误;32-机器人报错-碰撞错误;33-机器人报错-活动从站数量错误;
+		34-机器人报错-从站错误;35-机器人报错-IO错误;36-机器人报错-夹爪错误;37-机器人报错-文件错误;38-机器人报错-奇异位姿错误;
+		39-机器人报错-驱动器通信错误;40-机器人报错-参数错误;41-机器人报错-外部轴超出软限位错误;42-机器人警告-警告;
+		43-机器人警告-安全门警告;44-机器人警告-运动警告;45-机器人警告-干涉区警告;46-机器人警告-安全墙警告;
+		47-使能状态;48-断线自动抬升中;49-立方体1干涉警告;50-立方体2干涉警告;51-立方体3干涉警告;52-立方体4干涉警告;
+		201-急停输出信号1-双通道; 202-急停输出信号2-双通道; 203-安全状态输出-双通道; 204-保护性停止状态输出-双通道; 205-机器人运动中-双通道;
+		206-机器人缩减模式-双通道; 207-机器人非缩减模式-双通道;
     @return 错误码
     """
 
@@ -19364,3 +19502,211 @@ class RPC():
             self.log_error(f"execute WaitStationaryMotionDone fail: {error}.")
 
         return error
+
+    """
+    @brief 获取安全配置参数校验和
+    @param [out] status 校验状态，0-有效，1-校验中，2-校验失败
+    @param [out] checksum 校验和 8位16进制（底层返回uint32_t，需要手动转换）
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def GetSafetyParamsCheckSum(self):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        flag = True
+        while flag:
+            try:
+                _error = self.robot.GetSafetyParamsCheckSum()
+                flag = False
+            except socket.error as e:
+                flag = True
+        error = _error[0]
+        if error != 0:
+            self.log_error(f"execute WaitStationaryMotionDone fail: {error}.")
+            return error, None, None
+        else:
+            status = _error[1]
+            checksum = int(_error[2]) & 0xFFFFFFFF
+            hex_code = f"{checksum:08X}"
+            return error, status, hex_code
+
+    """
+    @brief 安全操作密码校验
+    @param [in] status 校验，0-开启，1-关闭
+    @param [in] password 密码
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SafetyOPPasswordCheck(self,status,password):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        status = int(status)
+        password = str(password)
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.SafetyOPPasswordCheck(status,password)
+                flag = False
+            except socket.error as e:
+                flag = True
+        if error != 0:
+            self.log_error(f"execute WaitStationaryMotionDone fail: {error}.")
+        return error
+
+
+    """
+    @brief 等待夹爪运动状态
+    @param [in] status 0-运动未完成，1-运动完成未检测到物体，2-运动完成检测到物体
+    @param [in] timeout 超时时间（ms），-1永久等待
+    @param [in] strategy 0-停止报错，1-继续运行
+    @param [in] type 0-平行夹爪，1-旋转夹爪
+    @return 错误码
+    """
+
+
+    @log_call
+    @xmlrpc_timeout
+    def GripperWaitMotionDone(self, status, timeout, strategy, type):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        status = int(status)
+        timeout = int(timeout)
+        strategy = int(strategy)
+        type = int(type)
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.GripperWaitMotionDone(status, timeout, strategy, type)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        return error
+
+    """
+    @brief 安全双通道CI功能配置
+    @param [in] ID 双通道ID; [0-3]
+    @param [in] config 功能配置; 0-无配置; 201-外部急停输入信号1; 202-外部急停输入信号2; 203-一级缩减模式; 204-二级缩减模式; 205-三级缩减模式;
+                           206-常规停止; 207-安全墙1; 208-安全墙2; 209-安全墙3; 210-安全墙4; 211-安全墙5; 212-安全墙6; 213-安全墙7;
+                           214-安全墙8; 215-安全停止重置;
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetSafetyDIConfig(self, ID, config):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        ID = int(ID)
+        config = int(config)
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.SetSafetyDIConfig(ID, config)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        if error != 0:
+            self.log_error(f"execute SetSafetyDIConfig fail: {error}.")
+
+        return error
+
+    """
+    @brief 安全双通道CO功能配置
+    @param [in] ID 双通道ID; [0-3]
+    @param [in] config 功能配置; 0-无配置; 201-急停输出信号1; 202-急停输出信号2; 203-安全状态输出; 204-保护性停止状态输出; 205-机器人运动中;
+                           206-机器人缩减模式; 207-机器人非缩减模式;
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetSafetyDOConfig(self, ID, config):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        ID = int(ID)
+        config = int(config)
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.SetSafetyDOConfig(ID, config)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        if error != 0:
+            self.log_error(f"execute SetSafetyDOConfig fail: {error}.")
+
+        return error
+
+    """
+    @brief 切换手动高速模式
+    @param [in] state 0-退出手动高速；1-进入手动高速
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def HiSpeedManualSwitch(self, state):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        state = int(state)
+
+        flag = True
+        while flag:
+            try:
+                error = self.robot.HiSpeedManualSwitch(state)
+                flag = False
+            except socket.error as e:
+                flag = True
+
+        return error
+
+    """
+    @brief 获取当前上位机系统时间并发送给机器人，同步系统时间（由于QNX系统限制，同步精度为分钟级）
+    @return 错误码
+    """
+
+    @log_call
+    @xmlrpc_timeout
+    def SetRobottime(self):
+        while self.reconnect_flag:
+            time.sleep(0.1)
+
+        if self.GetSafetyCode() != 0:
+            return self.GetSafetyCode()
+
+        now = datetime.datetime.now()
+
+        # 格式化日期和时间为指定格式
+        date_str = now.strftime("%d %m %Y")
+        time_str = now.strftime("%H%M")
+
+        # 构建命令字符串
+        command = f"SetQNXSystemTime(\"{date_str}\",\"{time_str}\")"
+
+        # 获取下一个计数
+        count = self._get_next_udp_count()
+
+        # 构建UDP帧数据
+        cmd_id = 343
+        udp_data = f"/f/bIII{count}III{cmd_id}III{len(command)}III{command}III/b/f"
+
+        error = self.SendUDPFrame(udp_data)
+
+        return 0
