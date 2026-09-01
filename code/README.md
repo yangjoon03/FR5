@@ -23,6 +23,7 @@ code/
 │   ├── 12_system_and_version/        # 시간 동기화, 버전, 업그레이드
 │   ├── 13_modbus_485/                # RS-485 보조 서보축
 │   └── 14_advanced_trajectory/       # 궤적파일 재생, 고급 서보 스트리밍
+├── webcontrol/                       # 브라우저에서 로봇 제어하는 로컬 웹 패널 (webcontrol/README.md 참고)
 └── README.md                         # 이 문서
 ```
 

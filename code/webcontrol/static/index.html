@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FR5 로봇 웹 컨트롤 패널</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="emergency-bar">
+  <button id="btn-stop" class="btn-emergency">■ 정지 (STOP)</button>
+  <button id="btn-pause" class="btn-secondary">일시정지</button>
+  <button id="btn-resume" class="btn-secondary">재개</button>
+  <span id="conn-indicator" class="badge badge-off">연결 안됨</span>
+</div>
+
+<div class="container">
+
+  <!-- 연결 -->
+  <section class="card">
+    <h2>1. 연결</h2>
+    <div class="row">
+      <input id="ip-input" type="text" value="192.168.58.2" placeholder="컨트롤러 IP">
+      <button id="btn-connect" class="btn-primary">연결</button>
+    </div>
+    <pre id="status-box" class="status-box">아직 연결하지 않았습니다.</pre>
+  </section>
+
+  <!-- 기본 제어 -->
+  <section class="card">
+    <h2>2. 기본 제어</h2>
+    <div class="row wrap">
+      <div class="control-group">
+        <span class="label">활성화(Enable)</span>
+        <button data-api="/api/enable" data-body='{"state":1}' class="btn-toggle btn-on">ON</button>
+        <button data-api="/api/enable" data-body='{"state":0}' class="btn-toggle btn-off">OFF</button>
+      </div>
+      <div class="control-group">
+        <span class="label">모드</span>
+        <button data-api="/api/mode" data-body='{"state":0}' class="btn-toggle">자동</button>
+        <button data-api="/api/mode" data-body='{"state":1}' class="btn-toggle">수동</button>
+      </div>
+      <div class="control-group">
+        <span class="label">드래그 티칭 (사람이 직접 움직이기)</span>
+        <button data-api="/api/drag_teach" data-body='{"state":1}' class="btn-toggle btn-on">진입</button>
+        <button data-api="/api/drag_teach" data-body='{"state":0}' class="btn-toggle btn-off">해제</button>
+      </div>
+      <div class="control-group">
+        <span class="label">에러</span>
+        <button data-api="/api/reset_error" data-body='{}' class="btn-toggle">에러 초기화</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 공통 속도 -->
+  <section class="card">
+    <h2>3. 공통 속도</h2>
+    <div class="row">
+      <label for="vel-slider">속도 <span id="vel-value">20</span>%</label>
+      <input id="vel-slider" type="range" min="1" max="100" value="20">
+    </div>
+  </section>
+
+  <!-- 조그 -->
+  <section class="card">
+    <h2>4. 조그 (버튼을 누르고 있는 동안 이동)</h2>
+    <div class="row">
+      <label>기준좌표계:</label>
+      <select id="jog-ref">
+        <option value="0">관절(joint)</option>
+        <option value="2">베이스(base)</option>
+        <option value="4">툴(tool)</option>
+        <option value="8">사용자(workpiece)</option>
+      </select>
+    </div>
+    <div class="jog-grid" id="jog-grid">
+      <!-- JS로 채움 -->
+    </div>
+  </section>
+
+  <!-- 직선/회전 정밀 이동 -->
+  <section class="card">
+    <h2>5. 정밀 이동 (수직/수평/회전, cm·도 단위 입력)</h2>
+    <div class="row wrap">
+      <div class="control-group">
+        <span class="label">직선 이동 (mm→cm)</span>
+        <select id="lin-axis">
+          <option value="x">X (수평)</option>
+          <option value="y">Y (수평)</option>
+          <option value="z">Z (수직)</option>
+        </select>
+        <input id="lin-distance" type="number" value="10" step="0.5" style="width:70px"> cm
+        <button id="btn-lin-minus" class="btn-secondary">−</button>
+        <button id="btn-lin-plus" class="btn-primary">+</button>
+      </div>
+      <div class="control-group">
+        <span class="label">제자리 회전</span>
+        <select id="rot-axis">
+          <option value="rx">Rx</option>
+          <option value="ry">Ry</option>
+          <option value="rz">Rz</option>
+        </select>
+        <input id="rot-angle" type="number" value="15" step="1" style="width:70px"> °
+        <button id="btn-rot-minus" class="btn-secondary">−</button>
+        <button id="btn-rot-plus" class="btn-primary">+</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 도형 그리기 -->
+  <section class="card">
+    <h2>6. 도형 그리기 (현재 위치 기준)</h2>
+    <div class="row">
+      <label>평면:</label>
+      <select id="shape-plane">
+        <option value="XY">XY (바닥과 평행)</option>
+        <option value="XZ">XZ</option>
+        <option value="YZ">YZ</option>
+      </select>
+      <label>방향:</label>
+      <select id="shape-direction">
+        <option value="ccw">반시계(CCW)</option>
+        <option value="cw">시계(CW)</option>
+      </select>
+    </div>
+
+    <div class="shape-grid">
+      <div class="shape-box">
+        <h3>원 (완전한 원)</h3>
+        <label>반지름 <input id="circle-radius" type="number" value="10" step="0.5" style="width:60px"> cm</label>
+        <button class="btn-primary shape-btn" data-shape="circle">그리기</button>
+      </div>
+
+      <div class="shape-box">
+        <h3>호 (부분 원)</h3>
+        <label>반지름 <input id="arc-radius" type="number" value="10" step="0.5" style="width:60px"> cm</label>
+        <label>각도 <input id="arc-sweep" type="number" value="90" step="5" style="width:60px"> °</label>
+        <button class="btn-primary shape-btn" data-shape="arc">그리기</button>
+      </div>
+
+      <div class="shape-box">
+        <h3>정다각형</h3>
+        <label>변 개수 <input id="poly-sides" type="number" value="3" min="3" step="1" style="width:60px"></label>
+        <label>한 변 길이 <input id="poly-side" type="number" value="10" step="0.5" style="width:60px"> cm</label>
+        <button class="btn-primary shape-btn" data-shape="polygon">그리기</button>
+      </div>
+
+      <div class="shape-box">
+        <h3>타원</h3>
+        <label>가로 반지름(a) <input id="ellipse-a" type="number" value="15" step="0.5" style="width:60px"> cm</label>
+        <label>세로 반지름(b) <input id="ellipse-b" type="number" value="8" step="0.5" style="width:60px"> cm</label>
+        <label>매끄러움 <input id="ellipse-seg" type="number" value="36" min="8" step="1" style="width:60px"></label>
+        <button class="btn-primary shape-btn" data-shape="ellipse">그리기</button>
+      </div>
+
+      <div class="shape-box">
+        <h3>나선(스파이럴)</h3>
+        <label>회전수 <input id="spiral-turns" type="number" value="5" step="0.5" style="width:60px"></label>
+        <label>기울기 <input id="spiral-tilt" type="number" value="0" step="1" style="width:60px"> °</label>
+        <label>초기 반지름 <input id="spiral-r0" type="number" value="3" step="0.5" style="width:60px"> cm</label>
+        <label>반지름 증가 <input id="spiral-radd" type="number" value="1" step="0.5" style="width:60px"> cm</label>
+        <label>축 방향 증가 <input id="spiral-aadd" type="number" value="0" step="0.5" style="width:60px"> cm</label>
+        <button class="btn-primary shape-btn" data-shape="spiral">그리기</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="toast" class="toast"></div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
