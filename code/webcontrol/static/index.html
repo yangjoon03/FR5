@@ -84,7 +84,7 @@
     <h2>5. 정밀 이동 (수직/수평/회전, cm·도 단위 입력)</h2>
     <div class="row wrap">
       <div class="control-group">
-        <span class="label">직선 이동 (mm→cm)</span>
+        <span class="label">직선 이동 (베이스 좌표계)</span>
         <select id="lin-axis">
           <option value="x">X (수평)</option>
           <option value="y">Y (수평)</option>
@@ -93,6 +93,17 @@
         <input id="lin-distance" type="number" value="10" step="0.5" style="width:70px"> cm
         <button id="btn-lin-minus" class="btn-secondary">−</button>
         <button id="btn-lin-plus" class="btn-primary">+</button>
+      </div>
+      <div class="control-group">
+        <span class="label">공구 방향 이동 (Z=J6 앞/뒤)</span>
+        <select id="tool-axis">
+          <option value="z">Z (J6 전진/후진)</option>
+          <option value="x">X (공구 기준)</option>
+          <option value="y">Y (공구 기준)</option>
+        </select>
+        <input id="tool-distance" type="number" value="10" step="0.5" style="width:70px"> cm
+        <button id="btn-tool-minus" class="btn-secondary">− (후진)</button>
+        <button id="btn-tool-plus" class="btn-primary">+ (전진)</button>
       </div>
       <div class="control-group">
         <span class="label">제자리 회전</span>

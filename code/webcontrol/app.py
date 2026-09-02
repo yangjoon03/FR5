@@ -146,7 +146,7 @@ def api_move_linear():
     try:
         error = manager.move_linear(
             axis=body["axis"], distance_cm=float(body["distance_cm"]),
-            sign=body.get("sign", "+"), vel=body.get("vel"),
+            sign=body.get("sign", "+"), vel=body.get("vel"), frame=body.get("frame", "base"),
         )
         return ok({"error": error})
     except (KeyError, ValueError) as e:

@@ -176,10 +176,19 @@ class RobotManager:
     # ------------------------------------------------------------------
     # 직선/회전 상대 이동 (수직/수평 이동, 제자리 회전)
     # ------------------------------------------------------------------
-    def move_linear(self, axis: str, distance_cm: float, sign: str = "+", vel: float = None):
+    def move_linear(self, axis: str, distance_cm: float, sign: str = "+", vel: float = None, frame: str = "base"):
+        """
+        frame='base': 베이스(세상) 좌표계 기준 x/y/z로 평행이동 (기존 수직/수평 이동).
+        frame='tool': 공구가 지금 향하고 있는 방향 기준 x/y/z로 평행이동.
+                      z축이 곧 J6(공구 접근 방향) 앞/뒤 전진·후진에 해당.
+        """
         vel = vel or self.default_vel
         with self._rpc_lock:
             current = self._current_tcp_pose_locked()
+            if frame == "tool":
+                offset = geometry.tool_axis_offset_vector(axis, cm_to_mm(distance_cm), sign)
+                return self.robot.MoveL(current, tool=self.default_tool, user=self.default_user, vel=vel,
+                                         offset_flag=2, offset_pos=offset)
             target = geometry.linear_offset(current, axis, cm_to_mm(distance_cm), sign)
             return self.robot.MoveL(target, tool=self.default_tool, user=self.default_user, vel=vel)
 

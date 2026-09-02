@@ -49,6 +49,31 @@ def make_point(base_pose, u, v, plane):
     return p
 
 
+def tool_axis_offset_vector(axis: str, distance_mm: float, sign: str = "+"):
+    """
+    로봇의 MoveL이 지원하는 "툴 좌표계 오프셋"(offset_flag=2)에 넘길
+    오프셋 벡터[dx,dy,dz,0,0,0]를 만듭니다. 베이스 좌표가 아니라
+    "공구가 현재 향하고 있는 방향" 기준이라, 공구 자세가 어떻든 항상
+    같은 의미(예: z=공구 앞/뒤 방향)를 가집니다.
+
+    J6(손목 마지막 관절)는 보통 공구의 접근/전진 방향(z축)과 나란하므로,
+    axis='z'가 곧 "J6 방향으로 전진/후진"에 해당합니다.
+    - axis: 'x' | 'y' | 'z' (공구 좌표계 기준)
+    - sign: '+' | '-'
+
+    반환값은 절대좌표가 아니라 오프셋량이므로, 그대로 MoveL의
+    offset_pos에 넣고 desc_pos에는 현재 위치를 그대로 넣으면 됩니다.
+    """
+    axis = axis.lower()
+    idx = {"x": 0, "y": 1, "z": 2}.get(axis)
+    if idx is None:
+        raise ValueError("axis는 'x','y','z' 중 하나여야 합니다: %s" % axis)
+    d = distance_mm if sign == "+" else -distance_mm
+    vec = [0.0] * 6
+    vec[idx] = d
+    return vec
+
+
 def linear_offset(current_pose, axis: str, distance_mm: float, sign: str = "+"):
     """
     현재 위치에서 한 축(x/y/z) 방향으로 distance_mm 만큼 평행이동한 목표

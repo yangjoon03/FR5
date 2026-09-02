@@ -154,12 +154,24 @@ function bindLinear(btnId, sign) {
     api("/api/move/linear", {
       axis: document.getElementById("lin-axis").value,
       distance_cm: Number(document.getElementById("lin-distance").value),
-      sign, vel: getVel(),
+      sign, vel: getVel(), frame: "base",
     });
   });
 }
 bindLinear("btn-lin-plus", "+");
 bindLinear("btn-lin-minus", "-");
+
+function bindToolLinear(btnId, sign) {
+  document.getElementById(btnId).addEventListener("click", () => {
+    api("/api/move/linear", {
+      axis: document.getElementById("tool-axis").value,
+      distance_cm: Number(document.getElementById("tool-distance").value),
+      sign, vel: getVel(), frame: "tool",
+    });
+  });
+}
+bindToolLinear("btn-tool-plus", "+");
+bindToolLinear("btn-tool-minus", "-");
 
 function bindRotate(btnId, sign) {
   document.getElementById(btnId).addEventListener("click", () => {
