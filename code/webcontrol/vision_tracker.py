@@ -22,11 +22,42 @@ from face_tracking import FaceLock, compute_correction
 _HARD_MAX_STEP_MM = 15.0  # 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
 
 
+def list_available_cameras(max_index: int = 5, already_open_index: int = None):
+    """
+    OpenCV엔 "연결된 카메라 목록"을 바로 주는 API가 없어서, 인덱스
+    0번부터 max_index-1번까지 순서대로 실제로 열어보고, 열리는 것만
+    추려서 반환합니다 (해상도도 같이 확인).
+
+    - already_open_index: 지금 이미 이 서버가 열어서 쓰고 있는 인덱스가
+      있으면 다시 열어보지 않고(장치가 이미 점유돼서 어차피 실패하거나
+      스트림이 끊길 수 있음) "현재 연결됨"으로만 표시.
+    """
+    results = []
+    for i in range(max_index):
+        if already_open_index is not None and i == already_open_index:
+            results.append({"index": i, "width": None, "height": None, "in_use": True})
+            continue
+        cap = cv2.VideoCapture(i)
+        try:
+            opened = cap.isOpened()
+            width = height = None
+            if opened:
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    height, width = frame.shape[:2]
+        finally:
+            cap.release()
+        if opened:
+            results.append({"index": i, "width": width, "height": height, "in_use": False})
+    return results
+
+
 class CameraTracker:
     def __init__(self, robot_manager):
         self._manager = robot_manager
 
         self._cap = None
+        self._index = None
         self._detector = None
         self._capture_thread = None
         self._running = False
@@ -67,6 +98,7 @@ class CameraTracker:
             raise RuntimeError(f"카메라 인덱스 {index}를 열 수 없습니다. 다른 프로그램이 쓰고 있거나 잘못된 인덱스일 수 있습니다.")
         self._detector = self._load_detector()
         self._cap = cap
+        self._index = int(index)
         self._face_lock.reset()
         self._running = True
         self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -82,6 +114,7 @@ class CameraTracker:
         if self._cap is not None:
             self._cap.release()
             self._cap = None
+        self._index = None
         with self._lock:
             self._latest_jpeg = None
             self._current_bbox = None
@@ -89,6 +122,9 @@ class CameraTracker:
 
     def is_open(self) -> bool:
         return self._cap is not None
+
+    def current_index(self):
+        return self._index
 
     # ------------------------------------------------------------------
     def _capture_loop(self):
@@ -175,6 +211,7 @@ class CameraTracker:
             err = self._last_error or {}
         return {
             "opened": self.is_open(),
+            "index": self._index,
             "tracking_enabled": self._tracking_enabled,
             "face_found": face_found,
             "target_size_ratio": round(self._target_size_ratio, 4),

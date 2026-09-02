@@ -13,7 +13,7 @@ import time
 from flask import Flask, request, jsonify, send_from_directory, Response
 
 from robot_manager import manager, RobotNotConnected
-from vision_tracker import CameraTracker
+from vision_tracker import CameraTracker, list_available_cameras
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 tracker = CameraTracker(manager)
@@ -244,6 +244,16 @@ def api_shape_spiral():
 # ----------------------------------------------------------------------
 # 카메라 얼굴 트래킹
 # ----------------------------------------------------------------------
+@app.route("/api/camera/list", methods=["GET"])
+def api_camera_list():
+    try:
+        max_index = int(request.args.get("max_index", 5))
+        cams = list_available_cameras(max_index, already_open_index=tracker.current_index())
+        return ok({"cameras": cams})
+    except Exception as e:
+        return fail(f"카메라 목록 조회 실패: {e}", 500)
+
+
 @app.route("/api/camera/open", methods=["POST"])
 def api_camera_open():
     body = request.get_json(force=True) or {}

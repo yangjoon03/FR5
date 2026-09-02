@@ -189,7 +189,11 @@
       로봇은 움직이지 않습니다.
     </p>
     <div class="row wrap">
-      <input id="camera-index" type="number" value="0" min="0" style="width:60px">
+      <select id="camera-list"><option value="">-- 목록 불러오기 --</option></select>
+      <button id="btn-camera-refresh" class="btn-secondary">카메라 목록 새로고침</button>
+    </div>
+    <div class="row wrap">
+      <label>인덱스 <input id="camera-index" type="number" value="0" min="0" style="width:60px"></label>
       <button id="btn-camera-open" class="btn-primary">확인 (카메라 열기)</button>
       <button id="btn-camera-close" class="btn-secondary">닫기</button>
     </div>

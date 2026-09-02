@@ -270,6 +270,39 @@ async function pollCameraState() {
     `최대 이동폭    : ${d.max_step_mm} mm`;
 }
 
+document.getElementById("btn-camera-refresh").addEventListener("click", async () => {
+  const select = document.getElementById("camera-list");
+  select.innerHTML = "<option value=''>불러오는 중...</option>";
+  try {
+    const res = await fetch("/api/camera/list?max_index=5");
+    const json = await res.json();
+    if (!json.ok) { toast("카메라 목록 조회 실패: " + json.error, true); return; }
+    const cams = json.data.cameras;
+    select.innerHTML = "";
+    if (cams.length === 0) {
+      select.innerHTML = "<option value=''>연결된 카메라 없음</option>";
+      return;
+    }
+    cams.forEach(c => {
+      const opt = document.createElement("option");
+      opt.value = c.index;
+      opt.textContent = c.in_use
+        ? `카메라 ${c.index} (현재 연결됨)`
+        : `카메라 ${c.index} (${c.width}x${c.height})`;
+      select.appendChild(opt);
+    });
+    toast(`카메라 ${cams.length}개 발견`);
+  } catch (e) {
+    toast("카메라 목록 조회 실패: " + e, true);
+  }
+});
+
+document.getElementById("camera-list").addEventListener("change", (e) => {
+  if (e.target.value !== "") {
+    document.getElementById("camera-index").value = e.target.value;
+  }
+});
+
 document.getElementById("btn-camera-open").addEventListener("click", async () => {
   const index = Number(document.getElementById("camera-index").value);
   const data = await api("/api/camera/open", { index });
