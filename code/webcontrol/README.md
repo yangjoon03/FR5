@@ -17,7 +17,9 @@ python3 app.py
 ## 구성
 
 - `geometry.py` — 현재 위치 기준으로 원/호/다각형/타원/직선/회전 목표 좌표를 계산
-- `robot_manager.py` — `fairino.Robot`을 감싸는 스레드-세이프 래퍼 (이동 명령은 락으로 직렬화, 정지 계열은 락 없이 즉시 실행)
+- `robot_manager.py` — `fairino.Robot`을 감싸는 스레드-세이프 래퍼. 메인 커넥션(상태조회/활성화/이동/조그)은 `_rpc_lock`으로 직렬화하고, 정지/일시정지/재개/조그즉시정지는 완전히 별도의 XML-RPC 커넥션(`_stop_lock`)으로 분리해서 메인 커넥션이 긴 이동 명령으로 바빠도 항상 즉시 처리됨
+- `face_tracking.py` — 얼굴 위치 → 로봇 이동량 변환 순수 로직 (카메라 없이 단위 테스트 가능)
+- `vision_tracker.py` — OpenCV로 카메라를 열고 얼굴을 검출/추적, 트래킹 중이면 `robot_manager.move_tool_offset()`으로 보정 명령 전송
 - `app.py` — Flask REST API
 - `static/` — 프론트엔드 (index.html / style.css / app.js)
 
@@ -47,8 +49,29 @@ python3 app.py
 | `POST /api/shape/polygon {sides,side_length_cm,plane,direction,vel}` | 정다각형 |
 | `POST /api/shape/ellipse {a_cm,b_cm,plane,direction,segments,vel}` | 타원 |
 | `POST /api/shape/spiral {turns,tilt_deg,radius_init_cm,radius_add_cm,axis_add_cm,direction,vel}` | 나선 |
+| `POST /api/camera/open {index}` / `close` | 카메라 열기/닫기 |
+| `GET /api/camera/stream` | MJPEG 실시간 미리보기 (얼굴 박스 표시됨) |
+| `GET /api/camera/state` | 트래킹 상태(인식여부/중심오차/크기비율 등) |
+| `POST /api/camera/calibrate` | 지금 보이는 얼굴 크기를 "유지할 거리" 기준으로 저장 |
+| `POST /api/camera/config {invert_x,invert_y,invert_z,max_step_mm}` | 축 반전/최대 이동폭 설정 |
+| `POST /api/camera/track/start` / `track/stop` | 얼굴 추적(로봇 이동) 시작/정지 |
 
 `plane`: `XY`/`XZ`/`YZ`, `direction`: `cw`/`ccw`.
+
+## 카메라 얼굴 트래킹 동작 방식
+
+1. 매 프레임 Haar Cascade(`cv2.CascadeClassifier`)로 얼굴을 검출.
+2. `face_tracking.FaceLock`이 **한 사람만** 계속 추적 — 처음엔 가장 큰(가장 가까운) 얼굴을 잡고, 그 다음부터는 이전 위치와 가장 가까운 얼굴만 같은 사람으로 인정. 잠깐(기본 10프레임) 안 보여도 마지막 위치를 유지하고, 그보다 오래 안 보이면 놓친 것으로 확정해 다음 프레임부터 다시 새 사람을 찾음.
+3. "트래킹 시작"을 누른 상태에서 얼굴이 인식되면, 0.25초마다 `face_tracking.compute_correction()`이 화면 중심과의 오차(x,y)·목표 크기와의 차이(거리)를 계산해서 `robot.move_tool_offset(dx,dy,dz)`로 공구 좌표계 기준 보정 이동을 보냄 (dz가 곧 J6/공구 전진-후진 방향의 거리 유지).
+4. 얼굴이 안 보이는 동안은 아무 명령도 보내지 않음(가만히 있음, 함부로 움직이지 않음).
+
+**안전장치**
+- 최대 이동폭(`max_step_mm`)은 서버에서 15mm를 상한으로 강제 — API로 더 큰 값을 넣어도 15mm에서 잘림.
+- "트래킹 시작"을 누르기 전에는 미리보기만 하고 로봇에 어떤 명령도 보내지 않음.
+- 상단 "정지" 버튼을 누르면 트래킹도 같이 꺼짐.
+- 카메라 장착 방향(로봇 기준 좌/우/상/하/전/후가 실제로 어느 쪽인지)은 검증 못 했으므로, 반대로 움직이면 UI의 반전 체크박스로 축별로 뒤집어서 맞춰야 합니다.
+
+⚠️ **이 기능은 실제 카메라·로봇에 전혀 테스트하지 못했습니다** (이 저장소는 로봇 미연결 환경에서 작성됨, 개발 환경엔 카메라 접근 권한도 없었음). `face_tracking.py`의 좌표 계산 로직만 단위 테스트로 검증했고, OpenCV 카메라 캡처·얼굴 검출·실제 로봇 반응은 검증되지 않았습니다. 반드시 처음에는 물체(인형 등)로, 최대 이동폭을 낮게, 정지 버튼에 손을 댄 채로 테스트하세요.
 
 ## 알려진 제약
 

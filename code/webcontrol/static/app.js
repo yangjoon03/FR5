@@ -238,3 +238,88 @@ document.querySelectorAll(".shape-btn").forEach(btn => {
     if (data !== null) toast(shape + " 실행 완료 (반환값: " + JSON.stringify(data.error) + ")");
   });
 });
+
+// ------------------------------------------------------------------
+// 카메라 얼굴 트래킹
+// ------------------------------------------------------------------
+let cameraPollTimer = null;
+
+function syncCameraConfigInputs(d) {
+  document.getElementById("invert-x").checked = !!d.invert.x;
+  document.getElementById("invert-y").checked = !!d.invert.y;
+  document.getElementById("invert-z").checked = !!d.invert.z;
+  document.getElementById("max-step").value = d.max_step_mm;
+}
+
+async function pollCameraState() {
+  const res = await fetch("/api/camera/state");
+  const json = await res.json();
+  if (!json.ok) return;
+  const d = json.data;
+  const box = document.getElementById("camera-status");
+  if (!d.opened) {
+    box.textContent = "카메라를 아직 열지 않았습니다.";
+    return;
+  }
+  box.textContent =
+    `트래킹 상태    : ${d.tracking_enabled ? "실행 중" : "정지"}\n` +
+    `얼굴 인식됨    : ${d.face_found ? "예" : "아니오 (사람 탐색 중)"}\n` +
+    `중심 오차(px)  : x=${d.error_x_px}, y=${d.error_y_px}\n` +
+    `크기비율/목표  : ${d.size_ratio} / ${d.target_size_ratio}\n` +
+    `반전 x/y/z     : ${d.invert.x}/${d.invert.y}/${d.invert.z}\n` +
+    `최대 이동폭    : ${d.max_step_mm} mm`;
+}
+
+document.getElementById("btn-camera-open").addEventListener("click", async () => {
+  const index = Number(document.getElementById("camera-index").value);
+  const data = await api("/api/camera/open", { index });
+  if (data === null) return;
+  const img = document.getElementById("camera-img");
+  img.src = "/api/camera/stream?t=" + Date.now();
+  toast("카메라 열림");
+  clearInterval(cameraPollTimer);
+  cameraPollTimer = setInterval(pollCameraState, 700);
+  pollCameraState();
+  const stateRes = await fetch("/api/camera/state");
+  const stateJson = await stateRes.json();
+  if (stateJson.ok) syncCameraConfigInputs(stateJson.data);
+});
+
+document.getElementById("btn-camera-close").addEventListener("click", async () => {
+  await api("/api/camera/close", {});
+  document.getElementById("camera-img").src = "";
+  clearInterval(cameraPollTimer);
+  document.getElementById("camera-status").textContent = "카메라를 닫았습니다.";
+  toast("카메라 닫힘");
+});
+
+document.getElementById("btn-camera-calibrate").addEventListener("click", async () => {
+  const data = await api("/api/camera/calibrate", {});
+  if (data !== null) toast("거리 기준 설정됨 (목표 크기비율: " + data.target_size_ratio.toFixed(3) + ")");
+});
+
+document.getElementById("btn-track-start").addEventListener("click", async () => {
+  const data = await api("/api/camera/track/start", {});
+  if (data !== null) toast("트래킹 시작");
+});
+
+document.getElementById("btn-track-stop").addEventListener("click", async () => {
+  await api("/api/camera/track/stop", {});
+  toast("트래킹 정지");
+});
+
+document.getElementById("btn-camera-config").addEventListener("click", async () => {
+  const data = await api("/api/camera/config", {
+    invert_x: document.getElementById("invert-x").checked,
+    invert_y: document.getElementById("invert-y").checked,
+    invert_z: document.getElementById("invert-z").checked,
+    max_step_mm: Number(document.getElementById("max-step").value),
+  });
+  if (data !== null) toast("설정 적용됨");
+});
+
+// 상단 정지 버튼은 카메라 트래킹도 같이 멈춤 (서버 /api/stop 안에서 처리되지만,
+// 화면 상태도 바로 갱신해준다)
+document.getElementById("btn-stop").addEventListener("click", () => {
+  pollCameraState();
+});

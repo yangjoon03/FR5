@@ -8,11 +8,15 @@ FR5 로봇 웹 컨트롤 패널 - Flask 백엔드
 (code/fairino/Robot.py)로 실제 로봇에 명령을 보냅니다. 로봇 컨트롤러와
 같은 네트워크(또는 이 PC에서 접근 가능한 네트워크)에 있어야 동작합니다.
 """
-from flask import Flask, request, jsonify, send_from_directory
+import time
+
+from flask import Flask, request, jsonify, send_from_directory, Response
 
 from robot_manager import manager, RobotNotConnected
+from vision_tracker import CameraTracker
 
 app = Flask(__name__, static_folder="static", static_url_path="")
+tracker = CameraTracker(manager)
 
 
 def ok(data=None):
@@ -92,6 +96,7 @@ def api_reset_error():
 # ----------------------------------------------------------------------
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
+    tracker.stop_tracking()  # 카메라 트래킹이 계속 보정 명령을 보내지 않도록 같이 끔
     error = manager.stop()
     return ok({"error": error})
 
@@ -234,6 +239,77 @@ def api_shape_spiral():
         return ok({"error": error})
     except (KeyError, ValueError) as e:
         return fail(f"파라미터 오류: {e}")
+
+
+# ----------------------------------------------------------------------
+# 카메라 얼굴 트래킹
+# ----------------------------------------------------------------------
+@app.route("/api/camera/open", methods=["POST"])
+def api_camera_open():
+    body = request.get_json(force=True) or {}
+    try:
+        tracker.open(int(body.get("index", 0)))
+        return ok({"opened": True})
+    except Exception as e:
+        return fail(f"카메라 열기 실패: {e}", 500)
+
+
+@app.route("/api/camera/close", methods=["POST"])
+def api_camera_close():
+    tracker.close()
+    return ok({"opened": False})
+
+
+@app.route("/api/camera/stream")
+def api_camera_stream():
+    def gen():
+        while tracker.is_open():
+            jpeg = tracker.get_jpeg()
+            if jpeg is None:
+                time.sleep(0.05)
+                continue
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n")
+            time.sleep(0.03)
+    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/api/camera/state", methods=["GET"])
+def api_camera_state():
+    return ok(tracker.state())
+
+
+@app.route("/api/camera/calibrate", methods=["POST"])
+def api_camera_calibrate():
+    try:
+        ratio = tracker.calibrate_distance()
+        return ok({"target_size_ratio": ratio})
+    except Exception as e:
+        return fail(str(e), 400)
+
+
+@app.route("/api/camera/config", methods=["POST"])
+def api_camera_config():
+    body = request.get_json(force=True) or {}
+    tracker.update_config(
+        invert_x=body.get("invert_x"), invert_y=body.get("invert_y"), invert_z=body.get("invert_z"),
+        max_step_mm=body.get("max_step_mm"),
+    )
+    return ok(tracker.state())
+
+
+@app.route("/api/camera/track/start", methods=["POST"])
+def api_camera_track_start():
+    try:
+        tracker.start_tracking()
+        return ok({"tracking": True})
+    except Exception as e:
+        return fail(str(e), 400)
+
+
+@app.route("/api/camera/track/stop", methods=["POST"])
+def api_camera_track_stop():
+    tracker.stop_tracking()
+    return ok({"tracking": False})
 
 
 if __name__ == "__main__":

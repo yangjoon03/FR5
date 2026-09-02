@@ -183,14 +183,26 @@ class RobotManager:
                       z축이 곧 J6(공구 접근 방향) 앞/뒤 전진·후진에 해당.
         """
         vel = vel or self.default_vel
+        if frame == "tool":
+            offset = geometry.tool_axis_offset_vector(axis, cm_to_mm(distance_cm), sign)
+            return self.move_tool_offset(offset[0], offset[1], offset[2], vel=vel)
         with self._rpc_lock:
             current = self._current_tcp_pose_locked()
-            if frame == "tool":
-                offset = geometry.tool_axis_offset_vector(axis, cm_to_mm(distance_cm), sign)
-                return self.robot.MoveL(current, tool=self.default_tool, user=self.default_user, vel=vel,
-                                         offset_flag=2, offset_pos=offset)
             target = geometry.linear_offset(current, axis, cm_to_mm(distance_cm), sign)
             return self.robot.MoveL(target, tool=self.default_tool, user=self.default_user, vel=vel)
+
+    def move_tool_offset(self, dx_mm: float, dy_mm: float, dz_mm: float, vel: float = None):
+        """
+        공구 좌표계 기준으로 x,y,z를 동시에 오프셋 이동 (MoveL의 offset_flag=2
+        기능). 카메라 얼굴 트래킹처럼 세 축을 한 번에 보정할 때 사용 -
+        3번 나눠 보내는 것보다 로봇이 한 번에 부드럽게 움직입니다.
+        """
+        vel = vel or self.default_vel
+        with self._rpc_lock:
+            current = self._current_tcp_pose_locked()
+            offset = [float(dx_mm), float(dy_mm), float(dz_mm), 0.0, 0.0, 0.0]
+            return self.robot.MoveL(current, tool=self.default_tool, user=self.default_user, vel=vel,
+                                     offset_flag=2, offset_pos=offset)
 
     def move_rotate(self, axis: str, angle_deg: float, sign: str = "+", vel: float = None):
         vel = vel or self.default_vel

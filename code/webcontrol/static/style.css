@@ -216,3 +216,34 @@ select {
   transform: translateX(-50%) translateY(0);
 }
 .toast.error { border-color: #ff5147; color: #ffb4af; }
+
+.warn-text {
+  background: #2a1f14;
+  border: 1px solid #6b4a1f;
+  color: #ffcf8a;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+.hint-text {
+  color: #9aa0a8;
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+
+.camera-wrap {
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  margin-bottom: 10px;
+}
+#camera-img {
+  max-width: 100%;
+  display: block;
+}
