@@ -301,8 +301,8 @@ def api_camera_calibrate():
 def api_camera_config():
     body = request.get_json(force=True) or {}
     tracker.update_config(
-        invert_x=body.get("invert_x"), invert_y=body.get("invert_y"), invert_z=body.get("invert_z"),
-        max_step_mm=body.get("max_step_mm"),
+        invert_pan=body.get("invert_pan"), invert_tilt=body.get("invert_tilt"), invert_z=body.get("invert_z"),
+        max_step_deg=body.get("max_step_deg"), max_step_mm=body.get("max_step_mm"),
     )
     return ok(tracker.state())
 

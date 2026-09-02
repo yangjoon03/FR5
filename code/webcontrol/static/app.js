@@ -245,10 +245,11 @@ document.querySelectorAll(".shape-btn").forEach(btn => {
 let cameraPollTimer = null;
 
 function syncCameraConfigInputs(d) {
-  document.getElementById("invert-x").checked = !!d.invert.x;
-  document.getElementById("invert-y").checked = !!d.invert.y;
+  document.getElementById("invert-pan").checked = !!d.invert.pan;
+  document.getElementById("invert-tilt").checked = !!d.invert.tilt;
   document.getElementById("invert-z").checked = !!d.invert.z;
-  document.getElementById("max-step").value = d.max_step_mm;
+  document.getElementById("max-step-deg").value = d.max_step_deg;
+  document.getElementById("max-step-mm").value = d.max_step_mm;
 }
 
 async function pollCameraState() {
@@ -266,7 +267,8 @@ async function pollCameraState() {
     `얼굴 인식됨    : ${d.face_found ? "예" : "아니오 (사람 탐색 중)"}\n` +
     `중심 오차(px)  : x=${d.error_x_px}, y=${d.error_y_px}\n` +
     `크기비율/목표  : ${d.size_ratio} / ${d.target_size_ratio}\n` +
-    `반전 x/y/z     : ${d.invert.x}/${d.invert.y}/${d.invert.z}\n` +
+    `반전 팬/틸트/거리 : ${d.invert.pan}/${d.invert.tilt}/${d.invert.z}\n` +
+    `최대 회전폭    : ${d.max_step_deg}°\n` +
     `최대 이동폭    : ${d.max_step_mm} mm`;
 }
 
@@ -343,10 +345,11 @@ document.getElementById("btn-track-stop").addEventListener("click", async () => 
 
 document.getElementById("btn-camera-config").addEventListener("click", async () => {
   const data = await api("/api/camera/config", {
-    invert_x: document.getElementById("invert-x").checked,
-    invert_y: document.getElementById("invert-y").checked,
+    invert_pan: document.getElementById("invert-pan").checked,
+    invert_tilt: document.getElementById("invert-tilt").checked,
     invert_z: document.getElementById("invert-z").checked,
-    max_step_mm: Number(document.getElementById("max-step").value),
+    max_step_deg: Number(document.getElementById("max-step-deg").value),
+    max_step_mm: Number(document.getElementById("max-step-mm").value),
   });
   if (data !== null) toast("설정 적용됨");
 });

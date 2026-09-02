@@ -191,16 +191,22 @@ class RobotManager:
             target = geometry.linear_offset(current, axis, cm_to_mm(distance_cm), sign)
             return self.robot.MoveL(target, tool=self.default_tool, user=self.default_user, vel=vel)
 
-    def move_tool_offset(self, dx_mm: float, dy_mm: float, dz_mm: float, vel: float = None):
+    def move_tool_offset(self, dx_mm: float, dy_mm: float, dz_mm: float,
+                          drx_deg: float = 0.0, dry_deg: float = 0.0, drz_deg: float = 0.0,
+                          vel: float = None):
         """
-        공구 좌표계 기준으로 x,y,z를 동시에 오프셋 이동 (MoveL의 offset_flag=2
-        기능). 카메라 얼굴 트래킹처럼 세 축을 한 번에 보정할 때 사용 -
-        3번 나눠 보내는 것보다 로봇이 한 번에 부드럽게 움직입니다.
+        공구 좌표계 기준으로 위치(x,y,z)와 자세(rx,ry,rz)를 동시에 오프셋
+        이동 (MoveL의 offset_flag=2 기능). 위치만 옮기면 평행이동(슬라이딩),
+        자세만 바꾸면 제자리 회전(팬/틸트)입니다. 카메라 얼굴 트래킹은
+        회전(팬/틸트)으로 중앙 정렬 + z 평행이동으로 거리 유지를 조합해서
+        사용합니다 - 여러 축을 한 번에 보정할 때 나눠 보내는 것보다
+        로봇이 한 번에 부드럽게 움직입니다.
         """
         vel = vel or self.default_vel
         with self._rpc_lock:
             current = self._current_tcp_pose_locked()
-            offset = [float(dx_mm), float(dy_mm), float(dz_mm), 0.0, 0.0, 0.0]
+            offset = [float(dx_mm), float(dy_mm), float(dz_mm),
+                      float(drx_deg), float(dry_deg), float(drz_deg)]
             return self.robot.MoveL(current, tool=self.default_tool, user=self.default_user, vel=vel,
                                      offset_flag=2, offset_pos=offset)
 

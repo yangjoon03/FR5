@@ -68,27 +68,36 @@ class FaceLock:
         self.lost_count = 0
 
 
-def compute_correction(frame_w, frame_h, bbox, target_size_ratio, gains, max_step_mm, invert):
+def compute_correction(frame_w, frame_h, bbox, target_size_ratio, gains, max_step_deg, max_step_mm, invert):
     """
     현재 얼굴 위치/크기와 목표(화면 중앙, 목표 크기)의 차이를 로봇의 툴
-    좌표계 기준 이동량(mm)으로 변환합니다.
+    좌표계 기준 회전량(팬/틸트, °)과 전후 이동량(거리 유지, mm)으로 변환합니다.
+
+    회전(팬/틸트) 방식: 화면 중앙 정렬은 손목을 "그 자리에서 돌려서"
+    맞추고(사람이 고개를 돌려 쳐다보는 것과 같은 방식), 거리 유지만
+    기존처럼 공구 Z축(전진/후진) 평행이동으로 처리합니다. 평행이동으로
+    좌우/상하까지 맞추면 팔 전체가 계속 옆으로 밀려나서 작업반경을 금방
+    벗어나지만, 회전은 제자리에서 방향만 바뀌므로 관절이 허용하는 각도
+    끝까지 훨씬 넓은 범위를 따라갈 수 있습니다.
 
     - bbox: (x,y,w,h) 픽셀 좌표 (검출된 얼굴 박스)
     - target_size_ratio: "이 정도 크기로 보이면 원하는 거리"의 기준값
       (얼굴 박스 너비 / 프레임 너비, 0~1)
-    - gains: {"x":.., "y":.., "z":..} 오차 1단위당 몇 mm 움직일지 (비례 게인)
-      x/y는 px당 mm, z는 size_ratio 오차당 mm
-    - max_step_mm: 한 틱(주기)당 최대 이동량 - 안전을 위한 클램프
-    - invert: {"x":bool,"y":bool,"z":bool} 카메라 장착 방향에 따라 부호 반전
+    - gains: {"pan":.., "tilt":.., "z":..} 오차 1단위당 움직일 양 (비례 게인)
+      pan/tilt는 px당 도(°), z는 size_ratio 오차당 mm
+    - max_step_deg: 한 틱(주기)당 최대 회전량(팬/틸트 공통) - 안전 클램프
+    - max_step_mm: 한 틱당 최대 전후 이동량(z) - 안전 클램프
+    - invert: {"pan":bool,"tilt":bool,"z":bool} 카메라 장착 방향에 따라 부호 반전
 
-    좌표 규약(반전 전 기준):
-    - err_x_px 양수(얼굴이 화면 오른쪽) -> dx 양수 -> 툴 좌표계 +X로 이동
-    - err_y_px 양수(얼굴이 화면 아래쪽) -> dy 양수 -> 툴 좌표계 +Y로 이동
-    - err_size 양수(얼굴이 목표보다 작음=더 멀리 있음) -> dz 양수 -> 툴 +Z(전진)
-    실제 카메라가 로봇에 어떤 방향으로 달려 있는지는 알 수 없으므로,
-    실기에서 반대로 움직이면 invert로 뒤집어서 맞추면 됩니다.
+    좌표 규약(반전 전 기준, 공구 좌표계 offset_flag=2 기준):
+    - err_x_px 양수(얼굴이 화면 오른쪽) -> d_pan 양수 -> 공구 Ry로 오른쪽을 봄
+    - err_y_px 양수(얼굴이 화면 아래쪽) -> d_tilt 양수 -> 공구 Rx로 아래를 봄
+    - err_size 양수(얼굴이 목표보다 작음=더 멀리 있음) -> dz 양수 -> 공구 +Z(전진)
+    실제 카메라가 로봇에 어떤 방향/자세로 달려 있는지는 알 수 없으므로
+    (팬이 Ry가 아니라 Rz일 수도 있음), 실기에서 반대로 돌거나 엉뚱한
+    축으로 돌면 invert로 뒤집어서 맞추면 됩니다.
 
-    반환: dict(dx, dy, dz, size_ratio, error_x_px, error_y_px)
+    반환: dict(d_pan, d_tilt, dz, size_ratio, error_x_px, error_y_px)
     """
     x, y, w, h = bbox
     if frame_w <= 0 or frame_h <= 0:
@@ -102,22 +111,25 @@ def compute_correction(frame_w, frame_h, bbox, target_size_ratio, gains, max_ste
     size_ratio = w / float(frame_w)
     err_size = target_size_ratio - size_ratio
 
-    def clamp(v):
+    def clamp_deg(v):
+        return max(-max_step_deg, min(max_step_deg, v))
+
+    def clamp_mm(v):
         return max(-max_step_mm, min(max_step_mm, v))
 
-    dx = clamp(err_x_px * gains["x"])
-    dy = clamp(err_y_px * gains["y"])
-    dz = clamp(err_size * gains["z"])
+    d_pan = clamp_deg(err_x_px * gains["pan"])
+    d_tilt = clamp_deg(err_y_px * gains["tilt"])
+    dz = clamp_mm(err_size * gains["z"])
 
-    if invert.get("x"):
-        dx = -dx
-    if invert.get("y"):
-        dy = -dy
+    if invert.get("pan"):
+        d_pan = -d_pan
+    if invert.get("tilt"):
+        d_tilt = -d_tilt
     if invert.get("z"):
         dz = -dz
 
     return {
-        "dx": dx, "dy": dy, "dz": dz,
+        "d_pan": d_pan, "d_tilt": d_tilt, "dz": dz,
         "size_ratio": size_ratio,
         "error_x_px": err_x_px, "error_y_px": err_y_px,
     }

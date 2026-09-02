@@ -211,16 +211,19 @@
     </div>
 
     <div class="row wrap">
-      <label><input type="checkbox" id="invert-x"> 좌우 반전</label>
-      <label><input type="checkbox" id="invert-y"> 상하 반전</label>
-      <label><input type="checkbox" id="invert-z"> 전후 반전</label>
-      <label>최대 이동폭(mm/주기) <input id="max-step" type="number" value="3" min="0" max="15" step="0.5" style="width:60px"></label>
+      <label><input type="checkbox" id="invert-pan"> 팬(좌우 회전) 반전</label>
+      <label><input type="checkbox" id="invert-tilt"> 틸트(상하 회전) 반전</label>
+      <label><input type="checkbox" id="invert-z"> 거리(전후) 반전</label>
+      <label>최대 회전폭(°/주기) <input id="max-step-deg" type="number" value="2" min="0" max="10" step="0.5" style="width:60px"></label>
+      <label>최대 이동폭(mm/주기) <input id="max-step-mm" type="number" value="3" min="0" max="15" step="0.5" style="width:60px"></label>
       <button id="btn-camera-config" class="btn-secondary">설정 적용</button>
     </div>
     <p class="hint-text">
-      로봇이 얼굴과 반대 방향으로 움직이면 해당 축의 "반전" 체크박스를
-      켜고 "설정 적용"을 누르세요. 최대 이동폭은 한 번 보정할 때(약 0.25초마다)
-      움직이는 최대 거리로, 서버에서 15mm를 넘지 못하도록 강제 제한됩니다.
+      중앙 정렬은 손목 회전(팬/틸트)으로, 거리 유지는 전후 평행이동으로
+      처리합니다. 로봇이 얼굴과 반대 방향으로 돌거나 반대로 멀어지면
+      해당 축의 "반전" 체크박스를 켜고 "설정 적용"을 누르세요. 최대
+      회전폭/이동폭은 한 번 보정할 때(약 0.25초마다) 움직이는 최대량으로,
+      서버에서 각각 10°/15mm를 넘지 못하도록 강제 제한됩니다.
     </p>
   </section>
 

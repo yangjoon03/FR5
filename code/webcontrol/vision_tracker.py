@@ -4,8 +4,14 @@
 좌표/보정량 계산 자체는 face_tracking.py(순수 로직, 카메라 없이도
 테스트 가능)에 위임합니다.
 
+중앙 정렬은 손목 회전(팬/틸트)으로, 거리 유지는 공구 Z축 평행이동으로
+처리합니다 (평행이동만으로 좌우/상하까지 맞추면 팔 전체가 계속 옆으로
+밀려나 작업반경을 금방 벗어나므로, 회전으로 바꿔서 관절이 허용하는
+각도 끝까지 넓게 따라갈 수 있게 함).
+
 안전상 이유로 기본값을 보수적으로 잡았습니다:
-- max_step_mm 기본 3mm, 서버에서도 15mm를 하드 상한으로 강제
+- max_step_deg(팬/틸트) 기본 2°, 서버에서 10°를 하드 상한으로 강제
+- max_step_mm(거리 유지) 기본 3mm, 서버에서 15mm를 하드 상한으로 강제
 - tick_interval(보정 명령을 보내는 주기) 기본 0.25초 (초당 4회) -
   너무 빠르게 계속 이동 명령을 쏘지 않도록 함
 - 얼굴이 인식 안 되는 동안에는 어떤 보정도 보내지 않음(가만히 있음)
@@ -20,7 +26,8 @@ import cv2
 
 from face_tracking import FaceLock, compute_correction
 
-_HARD_MAX_STEP_MM = 15.0  # 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
+_HARD_MAX_STEP_MM = 15.0   # z(거리) 이동 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
+_HARD_MAX_STEP_DEG = 10.0  # 팬/틸트 회전 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
 
 # 일부 opencv-python 배포판(특히 headless나 conda 빌드 일부)은
 # cv2.data.haarcascades 안에 실제 모델 xml 파일을 담고 있지 않은 경우가
@@ -82,9 +89,10 @@ class CameraTracker:
         self._face_lock = FaceLock()
         self._target_size_ratio = 0.25
 
-        self.gains = {"x": 0.02, "y": 0.02, "z": 60.0}
+        self.gains = {"pan": 0.03, "tilt": 0.03, "z": 60.0}  # pan/tilt: °/px, z: mm/size_ratio오차
+        self.max_step_deg = 2.0
         self.max_step_mm = 3.0
-        self.invert = {"x": False, "y": False, "z": False}
+        self.invert = {"pan": False, "tilt": False, "z": False}
         self.tick_interval = 0.25
 
     # ------------------------------------------------------------------
@@ -177,12 +185,18 @@ class CameraTracker:
                 last_tick = now  # 사람을 놓친 동안은 보정 명령을 보내지 않음
 
     def _send_correction(self, w, h, bbox):
-        max_step = min(self.max_step_mm, _HARD_MAX_STEP_MM)
-        result = compute_correction(w, h, bbox, self._target_size_ratio, self.gains, max_step, self.invert)
+        max_deg = min(self.max_step_deg, _HARD_MAX_STEP_DEG)
+        max_mm = min(self.max_step_mm, _HARD_MAX_STEP_MM)
+        result = compute_correction(w, h, bbox, self._target_size_ratio, self.gains, max_deg, max_mm, self.invert)
         with self._lock:
             self._last_error = result
         try:
-            self._manager.move_tool_offset(result["dx"], result["dy"], result["dz"], vel=10.0)
+            # 중앙 정렬 = 손목 회전(팬=dry, 틸트=drx), 거리 유지 = 공구 Z 평행이동(dz)
+            self._manager.move_tool_offset(
+                0.0, 0.0, result["dz"],
+                drx_deg=result["d_tilt"], dry_deg=result["d_pan"], drz_deg=0.0,
+                vel=10.0,
+            )
         except Exception as e:
             print("[카메라 트래킹] 보정 이동 실패:", e)
 
@@ -207,13 +221,16 @@ class CameraTracker:
     def stop_tracking(self):
         self._tracking_enabled = False
 
-    def update_config(self, invert_x=None, invert_y=None, invert_z=None, max_step_mm=None):
-        if invert_x is not None:
-            self.invert["x"] = bool(invert_x)
-        if invert_y is not None:
-            self.invert["y"] = bool(invert_y)
+    def update_config(self, invert_pan=None, invert_tilt=None, invert_z=None,
+                      max_step_deg=None, max_step_mm=None):
+        if invert_pan is not None:
+            self.invert["pan"] = bool(invert_pan)
+        if invert_tilt is not None:
+            self.invert["tilt"] = bool(invert_tilt)
         if invert_z is not None:
             self.invert["z"] = bool(invert_z)
+        if max_step_deg is not None:
+            self.max_step_deg = max(0.0, min(float(max_step_deg), _HARD_MAX_STEP_DEG))
         if max_step_mm is not None:
             self.max_step_mm = max(0.0, min(float(max_step_mm), _HARD_MAX_STEP_MM))
 
@@ -231,5 +248,6 @@ class CameraTracker:
             "error_x_px": err.get("error_x_px", 0),
             "error_y_px": err.get("error_y_px", 0),
             "invert": dict(self.invert),
+            "max_step_deg": self.max_step_deg,
             "max_step_mm": self.max_step_mm,
         }
