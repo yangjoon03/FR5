@@ -46,6 +46,23 @@ class RobotManager:
         with self._state_lock:
             self._robot = Robot.RPC(ip)
             self._ip = ip
+
+            # 이 SDK 빌드는 XML-RPC(20003, 실제 이동 명령 채널)와 CNDE
+            # (20005, 최신 실시간 상태 스트리밍 채널) 둘 다 성공해야
+            # RPC.is_connect=True로 설정하고, 그렇지 않으면 모든 SDK 함수가
+            # 실제로 실행되지 않고 그냥 -4를 반환하도록 되어 있다
+            # (xmlrpc_timeout 데코레이터가 RPC.is_connect를 먼저 체크함).
+            # 컨트롤러가 CNDE 포트를 막아두거나 지원하지 않으면 XML-RPC만
+            # 살아있어도 전체가 잠겨버리므로, 이동 명령에 실제로 필요한
+            # XML-RPC 채널만 직접 우회 테스트해서 is_connect를 복구한다.
+            try:
+                self._robot.robot.GetControllerIP()  # 데코레이터를 안 거치는 원본 XML-RPC 호출
+            except Exception as e:
+                self._robot = None
+                self._ip = None
+                raise ConnectionError(f"XML-RPC(20003) 연결 자체가 안 됩니다: {e}")
+            Robot.RPC.is_connect = True
+
             error, sdk = self._robot.GetSDKVersion()
             return {"ip": ip, "sdk_version": sdk[0], "robot_version": sdk[1]}
 

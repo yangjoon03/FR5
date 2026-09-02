@@ -55,3 +55,16 @@ python3 app.py
 - 활성화(Enable) 상태를 직접 조회하는 SDK 함수가 없어, 현재 활성화 여부는 화면에 표시하지 않습니다 (버튼을 누른 결과의 반환값으로만 확인).
 - 도형 그리기는 이동 명령을 순차 실행하므로, 한 도형이 끝나기 전에 다른 이동을 누르면 락에 걸려 대기합니다. 즉시 멈추려면 상단 "정지" 버튼을 쓰세요.
 - 로봇 미연결 상태에서 코드만 보고 작성했습니다 — 실기 연결 후 저속으로 먼저 검증하세요.
+
+### SDK 연결 게이트 우회 (`is_connect`)
+
+이 SDK 빌드는 XML-RPC(20003, 실제 이동 명령 채널)와 CNDE(20005, 실시간
+상태 스트리밍 채널) **둘 다** 성공해야 `RPC.is_connect=True`로 설정하고,
+하나라도 실패하면 모든 SDK 함수가 실제 동작 없이 `-4`만 반환합니다.
+로봇 컨트롤러가 CNDE 포트를 막아두거나 지원하지 않는 경우(`Connection
+refused`) XML-RPC는 멀쩡한데도 전체가 잠겨버리는 문제가 있어서,
+`robot_manager.connect()`가 원본 XML-RPC 프록시(`robot.robot`)로
+`GetControllerIP()`를 직접 호출해 XML-RPC 채널만 따로 확인한 뒤
+`Robot.RPC.is_connect`를 강제로 복구합니다. 단, CNDE 자체가 필요한
+기능(`07_status_and_log`의 `AddRobotRealtimeState`류 실시간 구독)은
+CNDE가 실제로 안 붙어 있으면 여전히 동작하지 않습니다.

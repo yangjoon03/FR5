@@ -336,3 +336,4 @@ RS-485로 연결된 보조 서보축(회전지그 등) 제어 - 파라미터 설
 | `SetDexterousHandsMove` | 일부 예제 문맥상 인자 개수가 헷갈림 | 실제로는 `(idstart, slaveNum, pos, speed, force, max_time)` 6개 인자 필요 |
 | `SoftwareUpgrade` | 예제 주석에 두 번째 인자가 불명확 | 실제 의미는 `block`(True=완료까지 대기, False=즉시 반환)이며 "재부팅 여부"가 아님 |
 | `SetVelReducePara` | 예제 주석이 각 값의 의미를 물음표로 추측 | 실제로는 `enable`(0=끔/1=수동모드/2=전체모드), `maxTCPVel`, `strategy`(0=정지경고/1=자동감속/2=정지후비활성화) |
+| 모든 함수(`xmlrpc_timeout` 데코레이터) | `RPC.is_connect`가 XML-RPC(20003)와 CNDE(20005) 둘 다 성공해야 True가 됨 | 컨트롤러가 CNDE 포트를 막아두면(`Connection refused`) XML-RPC가 멀쩡해도 모든 함수가 실행 안 되고 `-4`만 반환. `code/webcontrol/robot_manager.py`의 `connect()`가 XML-RPC만 직접 확인해 우회하는 예시 참고 |
