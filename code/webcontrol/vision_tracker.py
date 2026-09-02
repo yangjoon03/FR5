@@ -12,6 +12,7 @@
 - "트래킹 시작" 버튼을 눌러야만 실제로 로봇에 명령이 나감(카메라
   미리보기만 켜져 있을 때는 로봇을 전혀 움직이지 않음)
 """
+import os
 import threading
 import time
 
@@ -20,6 +21,14 @@ import cv2
 from face_tracking import FaceLock, compute_correction
 
 _HARD_MAX_STEP_MM = 15.0  # 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
+
+# 일부 opencv-python 배포판(특히 headless나 conda 빌드 일부)은
+# cv2.data.haarcascades 안에 실제 모델 xml 파일을 담고 있지 않은 경우가
+# 있습니다(설치는 됐지만 데이터 리소스가 빠진 상태). 그래서 저장소 안에
+# 같은 파일을 직접 포함시켜두고, 시스템 쪽에 없으면 이걸 대신 씁니다.
+_BUNDLED_CASCADE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "models", "haarcascade_frontalface_default.xml"
+)
 
 
 def list_available_cameras(max_index: int = 5, already_open_index: int = None):
@@ -80,15 +89,18 @@ class CameraTracker:
 
     # ------------------------------------------------------------------
     def _load_detector(self):
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        detector = cv2.CascadeClassifier(cascade_path)
-        if detector.empty():
-            raise RuntimeError(
-                "얼굴 인식 모델 파일을 찾지 못했습니다 (%s). "
-                "opencv-python이 제대로 설치됐는지 확인하세요: "
-                "pip install --force-reinstall opencv-python" % cascade_path
-            )
-        return detector
+        system_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        for candidate in (system_path, _BUNDLED_CASCADE_PATH):
+            if not os.path.exists(candidate):
+                continue
+            detector = cv2.CascadeClassifier(candidate)
+            if not detector.empty():
+                return detector
+        raise RuntimeError(
+            "얼굴 인식 모델 파일을 찾지 못했습니다 (시스템 경로: %s / 내장 경로: %s 둘 다 없거나 로드 실패). "
+            "code/webcontrol/models/haarcascade_frontalface_default.xml 파일이 저장소에 그대로 있는지 확인하세요."
+            % (system_path, _BUNDLED_CASCADE_PATH)
+        )
 
     def open(self, index: int):
         self.close()
