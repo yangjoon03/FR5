@@ -193,14 +193,16 @@ class RobotManager:
 
     def move_tool_offset(self, dx_mm: float, dy_mm: float, dz_mm: float,
                           drx_deg: float = 0.0, dry_deg: float = 0.0, drz_deg: float = 0.0,
-                          vel: float = None):
+                          vel: float = None, blend_r: float = -1.0):
         """
         공구 좌표계 기준으로 위치(x,y,z)와 자세(rx,ry,rz)를 동시에 오프셋
         이동 (MoveL의 offset_flag=2 기능). 위치만 옮기면 평행이동(슬라이딩),
-        자세만 바꾸면 제자리 회전(팬/틸트)입니다. 카메라 얼굴 트래킹은
-        회전(팬/틸트)으로 중앙 정렬 + z 평행이동으로 거리 유지를 조합해서
-        사용합니다 - 여러 축을 한 번에 보정할 때 나눠 보내는 것보다
-        로봇이 한 번에 부드럽게 움직입니다.
+        자세만 바꾸면 제자리 회전(팬/틸트)입니다.
+
+        - blend_r: -1.0(기본)이면 이 이동이 끝날 때까지 완전히 멈췄다가
+          반환(블로킹). 0 이상을 주면 그 반경 안에서 다음 이동과 부드럽게
+          이어붙임(논블로킹에 가까움) - 카메라 트래킹처럼 아주 짧은 보정을
+          연달아 보낼 때 매번 급정거하지 않고 부드럽게 이어지도록 사용.
         """
         vel = vel or self.default_vel
         with self._rpc_lock:
@@ -208,7 +210,7 @@ class RobotManager:
             offset = [float(dx_mm), float(dy_mm), float(dz_mm),
                       float(drx_deg), float(dry_deg), float(drz_deg)]
             return self.robot.MoveL(current, tool=self.default_tool, user=self.default_user, vel=vel,
-                                     offset_flag=2, offset_pos=offset)
+                                     offset_flag=2, offset_pos=offset, blendR=blend_r)
 
     def move_rotate(self, axis: str, angle_deg: float, sign: str = "+", vel: float = None):
         vel = vel or self.default_vel

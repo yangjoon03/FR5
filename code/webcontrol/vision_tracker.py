@@ -217,10 +217,12 @@ class CameraTracker:
             self._last_error = result
         try:
             # 중앙 정렬 = 손목 회전(팬=dry, 틸트=drx), 거리 유지 = 공구 Z 평행이동(dz)
+            # blend_r>0: 매 틱마다 완전히 멈췄다 재출발하지 않고 부드럽게 이어붙임
+            # (급정거-재출발 반복으로 홱홱거리던 문제 완화)
             move_error = self._manager.move_tool_offset(
                 0.0, 0.0, result["dz"],
                 drx_deg=result["d_tilt"], dry_deg=result["d_pan"], drz_deg=0.0,
-                vel=10.0,
+                vel=10.0, blend_r=10.0,
             )
             with self._lock:
                 self._last_move_result = {"error": move_error, "exception": None}
