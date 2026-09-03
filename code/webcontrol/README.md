@@ -18,8 +18,8 @@ python3 app.py
 
 - `geometry.py` — 현재 위치 기준으로 원/호/다각형/타원/직선/회전 목표 좌표를 계산
 - `robot_manager.py` — `fairino.Robot`을 감싸는 스레드-세이프 래퍼. 메인 커넥션(상태조회/활성화/이동/조그)은 `_rpc_lock`으로 직렬화하고, 정지/일시정지/재개/조그즉시정지는 완전히 별도의 XML-RPC 커넥션(`_stop_lock`)으로 분리해서 메인 커넥션이 긴 이동 명령으로 바빠도 항상 즉시 처리됨
-- `face_tracking.py` — 얼굴 위치 → 로봇 이동량 변환 순수 로직 (카메라 없이 단위 테스트 가능)
-- `vision_tracker.py` — OpenCV로 카메라를 열고 얼굴을 검출/추적, 트래킹 중이면 `robot_manager.move_tool_offset()`으로 보정 명령 전송
+- `face_tracking.py` — 위치 → 로봇 이동량 변환 순수 로직 (얼굴이든 손이든 bbox 하나만 받으면 되는 범용 로직이라 이름만 남음, 카메라 없이 단위 테스트 가능)
+- `vision_tracker.py` — OpenCV로 카메라를 열고 MediaPipe로 오른손+손모양(제스처)을 검출/추적, "편 손"일 때만 `robot_manager.move_tool_offset()`으로 보정 명령 전송
 - `app.py` — Flask REST API
 - `static/` — 프론트엔드 (index.html / style.css / app.js)
 
@@ -50,30 +50,34 @@ python3 app.py
 | `POST /api/shape/ellipse {a_cm,b_cm,plane,direction,segments,vel}` | 타원 |
 | `POST /api/shape/spiral {turns,tilt_deg,radius_init_cm,radius_add_cm,axis_add_cm,direction,vel}` | 나선 |
 | `POST /api/camera/open {index}` / `close` | 카메라 열기/닫기 |
-| `GET /api/camera/stream` | MJPEG 실시간 미리보기 (얼굴 박스 표시됨) |
-| `GET /api/camera/state` | 트래킹 상태(인식여부/중심오차/크기비율 등) |
-| `POST /api/camera/calibrate` | 지금 보이는 얼굴 크기를 "유지할 거리" 기준으로 저장 |
-| `POST /api/camera/config {invert_pan,invert_tilt,invert_z,max_step_deg,max_step_mm}` | 회전/이동 반전 및 최대 회전폭·이동폭 설정 |
-| `POST /api/camera/track/start` / `track/stop` | 얼굴 추적(로봇 이동) 시작/정지 |
+| `GET /api/camera/stream` | MJPEG 실시간 미리보기 (손 박스 + 인식된 손모양 텍스트 표시됨) |
+| `GET /api/camera/state` | 트래킹 상태(인식여부/손모양/중심오차/크기비율 등) |
+| `POST /api/camera/calibrate` | 지금 보이는 오른손 크기를 "유지할 거리" 기준으로 저장 |
+| `POST /api/camera/config {invert_pan,invert_tilt,invert_z,invert_handedness,max_step_deg,max_step_mm}` | 회전/이동/좌우손 반전 및 최대 회전폭·이동폭 설정 |
+| `POST /api/camera/track/start` / `track/stop` | 손 추적(로봇 이동) 시작/정지 (수동 스위치 - 아래 제스처 게이트와 별개) |
 
 `plane`: `XY`/`XZ`/`YZ`, `direction`: `cw`/`ccw`.
 
-## 카메라 얼굴 트래킹 동작 방식
+## 카메라 오른손 트래킹 동작 방식
 
-1. 매 프레임 Haar Cascade(`cv2.CascadeClassifier`)로 얼굴을 검출.
-2. `face_tracking.FaceLock`이 **한 사람만** 계속 추적 — 처음엔 가장 큰(가장 가까운) 얼굴을 잡고, 그 다음부터는 이전 위치와 가장 가까운 얼굴만 같은 사람으로 인정. 잠깐(기본 10프레임) 안 보여도 마지막 위치를 유지하고, 그보다 오래 안 보이면 놓친 것으로 확정해 다음 프레임부터 다시 새 사람을 찾음.
-3. "트래킹 시작"을 누른 상태에서 얼굴이 인식되면, 0.25초마다 `face_tracking.compute_correction()`이 화면 중심과의 오차(x,y)·목표 크기와의 차이(거리)를 계산해서, **중앙 정렬은 손목 회전(팬=dry, 틸트=drx)으로, 거리 유지는 공구 Z축 평행이동(dz)으로** 조합한 뒤 `robot.move_tool_offset(0,0,dz,drx,dry,0)`로 공구 좌표계 기준 오프셋을 보냄.
+1. 매 프레임 MediaPipe `GestureRecognizer`로 손을 검출 — 위치(21개 랜드마크)와 손모양(제스처: `Open_Palm`, `Closed_Fist` 등), 좌우손(`Left`/`Right`)까지 한 모델이 같이 알려줌.
+2. 검출된 손 중 **`Right`(오른손)로 분류된 것만** 후보로 남김. MediaPipe의 좌우손 판정은 "거울에 비친(셀카) 영상" 기준이라 로봇 카메라(반전 안 된 일반 영상)에서는 실제 오른손이 `Left`로 잡힐 수 있음 — `invert_handedness`로 반전 가능.
+3. `face_tracking.FaceLock`(이름만 얼굴용, bbox면 뭐든 추적하는 범용 로직)이 그 후보들 중 **한 손만** 계속 추적 — 처음엔 가장 큰 손을 잡고, 그 다음부터는 이전 위치와 가장 가까운 것만 같은 손으로 인정. 잠깐(기본 10프레임) 안 보여도 마지막 위치를 유지하고, 그보다 오래 안 보이면 놓친 것으로 확정해 다음 프레임부터 다시 찾음.
+4. **손을 편 상태(`Open_Palm`)일 때만** 0.25초마다 `face_tracking.compute_correction()`이 화면 중심과의 오차(x,y)·목표 크기와의 차이(거리)를 계산해서, **중앙 정렬은 손목 회전(팬=dry, 틸트=drx)으로, 거리 유지는 공구 Z축 평행이동(dz)으로** 조합한 뒤 `robot.move_tool_offset(0,0,dz,drx,dry,0,blend_r=10)`로 공구 좌표계 기준 오프셋을 보냄. **주먹(`Closed_Fist`)을 쥐거나 그 외 모양이면, 혹은 손을 놓치면 그 순간 아무 명령도 안 보내고 멈춤** — 이게 사실상의 "실시간 정지 제스처".
    - 평행이동만으로 좌우/상하까지 맞추면 팔 전체가 계속 옆으로 밀려나서 작업반경을 금방 벗어나지만, 회전은 제자리에서 방향만 바뀌므로 관절이 허용하는 각도 끝까지 훨씬 넓은 범위를 따라갈 수 있음.
-   - 다만 로봇 팔은 베이스가 고정돼 있어서, 사람이 카메라 화각/관절 가동범위를 완전히 벗어나면(예: 로봇 뒤쪽으로 돎) 물리적으로 따라갈 수 없음 — 이 경우는 그냥 얼굴을 놓친 것으로 처리됨.
-4. 얼굴이 안 보이는 동안은 아무 명령도 보내지 않음(가만히 있음, 함부로 움직이지 않음).
+   - 다만 로봇 팔은 베이스가 고정돼 있어서, 손이 카메라 화각/관절 가동범위를 완전히 벗어나면 물리적으로 따라갈 수 없음 — 이 경우는 그냥 손을 놓친 것으로 처리됨.
+5. 흔들림(jitter) 대책: 검출된 bbox는 지수평활(`_smoothing_alpha=0.35`)로 부드럽게 만들고, `compute_correction`에 데드존(`deadzone_px=20`, `deadzone_ratio=0.02`)을 둬서 손이 실제로 안 움직였는데도 인식 흔들림만으로 로봇이 반응하지 않게 함.
 
 **안전장치**
 - 최대 회전폭(`max_step_deg`)은 서버에서 10°, 최대 이동폭(`max_step_mm`)은 15mm를 상한으로 강제 — API로 더 큰 값을 넣어도 이 값에서 잘림.
-- "트래킹 시작"을 누르기 전에는 미리보기만 하고 로봇에 어떤 명령도 보내지 않음.
+- "트래킹 시작"을 누르기 전에는 미리보기만 하고 로봇에 어떤 명령도 보내지 않음 (수동 스위치).
+- 트래킹이 켜져 있어도 **손을 펴고 있을 때만** 실제로 움직임 (제스처 게이트).
 - 상단 "정지" 버튼을 누르면 트래킹도 같이 꺼짐.
 - 카메라 장착 방향(팬이 실제로 Ry인지 Rz인지, 부호가 맞는지 등)은 검증 못 했으므로, 반대로 돌거나 엉뚱하게 움직이면 UI의 반전 체크박스로 축별로 뒤집어서 맞춰야 합니다.
 
-⚠️ **이 기능은 실제 카메라·로봇에 전혀 테스트하지 못했습니다** (이 저장소는 로봇 미연결 환경에서 작성됨, 개발 환경엔 카메라 접근 권한도 없었음). `face_tracking.py`의 좌표 계산 로직만 단위 테스트로 검증했고, OpenCV 카메라 캡처·얼굴 검출·실제 로봇 반응은 검증되지 않았습니다. 반드시 처음에는 물체(인형 등)로, 최대 이동폭을 낮게, 정지 버튼에 손을 댄 채로 테스트하세요.
+⚠️ **mediapipe 버전을 절대 올리지 마세요.** 최신 1.x(pip 기본 설치)는 `GestureRecognizer.recognize()` 호출 시 이 macOS 환경에서 매번 강제 종료(세그폴트급 crash, 파이썬 `try/except`로도 못 잡음 — 서버 프로세스 자체가 죽음)하는 것을 실제로 재현해서 확인했습니다. `requirements.txt`에 정상 동작을 확인한 `mediapipe==0.10.14`로 고정해뒀습니다.
+
+⚠️ **이 기능은 실제 카메라·로봇에 전혀 테스트하지 못했습니다** (이 저장소는 로봇 미연결 환경에서 작성됨, 개발 환경엔 실제 카메라도 없었음). 검증한 것: (1) 좌표/제스처 게이트 계산 로직 단위 테스트, (2) 빈 프레임으로 실제 MediaPipe 모델을 끝까지 돌려 크래시 없음 확인, (3) 가짜 인식 결과로 오른손 필터링·좌우반전·"편 손일 때만 이동" 로직이 의도대로 동작함을 확인. 실제 카메라의 손 인식 정확도, 실제 로봇의 회전 방향/속도感은 검증되지 않았습니다. 반드시 최대 이동폭을 낮게, 정지 버튼에 손을 댄 채로 테스트하세요.
 
 ## 알려진 제약
 
