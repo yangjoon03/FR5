@@ -212,6 +212,37 @@ class RobotManager:
             return self.robot.MoveL(current, tool=self.default_tool, user=self.default_user, vel=vel,
                                      offset_flag=2, offset_pos=offset, blendR=blend_r)
 
+    # ------------------------------------------------------------------
+    # 실시간 서보 스트리밍 (ServoCart) - 카메라 트래킹처럼 아주 짧은 주기로
+    # 계속 미세 보정을 보내야 하는 용도. MoveL과 달리 매번 "목표 자세로
+    # 가는 경로를 처음부터 계산"하지 않고 그냥 "지금 있는 자리에서 이만큼
+    # 더" 식으로 반영되는 가벼운 명령이라 지연이 훨씬 적음(02_movement/
+    # 04_move_servo_realtime.py 참고). 대신 반드시 servo_move_start()로
+    # 세션을 연 상태에서만 호출 가능하고, 끝나면 servo_move_end()로
+    # 닫아야 함 - 열어둔 채로 방치하면 이후 일반 MoveL 등이 씹힐 수 있음.
+    # ------------------------------------------------------------------
+    def servo_move_start(self):
+        with self._rpc_lock:
+            return self.robot.ServoMoveStart()
+
+    def servo_move_end(self):
+        with self._rpc_lock:
+            return self.robot.ServoMoveEnd()
+
+    def servo_cart_offset(self, dx_mm: float, dy_mm: float, dz_mm: float,
+                           drx_deg: float = 0.0, dry_deg: float = 0.0, drz_deg: float = 0.0,
+                           cmd_t: float = 0.05):
+        """
+        ServoCart(mode=2, 공구 좌표계 증분)으로 실시간 미세 보정 전송.
+        servo_move_start()~servo_move_end() 사이에서만 호출해야 함.
+        MoveL 기반 move_tool_offset()과 달리 현재 위치를 먼저 조회하지
+        않음 - 증분 명령이라 그럴 필요가 없고, 그만큼 왕복이 하나 줄어듦.
+        """
+        with self._rpc_lock:
+            offset = [float(dx_mm), float(dy_mm), float(dz_mm),
+                      float(drx_deg), float(dry_deg), float(drz_deg)]
+            return self.robot.ServoCart(mode=2, desc_pos=offset, exaxis=[], cmdT=cmd_t)
+
     def move_rotate(self, axis: str, angle_deg: float, sign: str = "+", vel: float = None):
         vel = vel or self.default_vel
         with self._rpc_lock:
