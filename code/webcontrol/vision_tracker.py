@@ -116,6 +116,10 @@ class CameraTracker:
         if not cap.isOpened():
             cap.release()
             raise RuntimeError(f"카메라 인덱스 {index}를 열 수 없습니다. 다른 프로그램이 쓰고 있거나 잘못된 인덱스일 수 있습니다.")
+        # macOS(AVFoundation)에서 일부 웹캠은 기본 포맷 협상이 잘못돼서
+        # 흑백처럼 보이는 경우가 있음 - MJPG로 강제 지정하면 대부분 해결됨.
+        # 실패해도(장치가 MJPG를 지원 안 해도) 무시하고 기본 포맷 그대로 사용.
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self._detector = self._load_detector()
         self._cap = cap
         self._index = int(index)
@@ -154,6 +158,9 @@ class CameraTracker:
             if not ok:
                 time.sleep(0.05)
                 continue
+
+            if frame.ndim == 2:  # 장치가 진짜로 단일 채널(흑백)만 주는 경우 - 그리기/인코딩 위해 3채널로 변환
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
 
             h, w = frame.shape[:2]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
