@@ -1,2 +1,7 @@
 flask>=3.0
 opencv-python>=4.8
+# mediapipe 버전은 정확히 고정하세요 (>= 로 두면 안 됩니다).
+# 최신 1.x(pip 기본 설치 버전)의 GestureRecognizer는 macOS에서 강제
+# 종료(세그폴트급, 파이썬 예외로도 못 잡음)하는 것을 확인했습니다.
+# 0.10.14는 정상 동작을 확인했습니다.
+mediapipe==0.10.14
