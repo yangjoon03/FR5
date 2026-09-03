@@ -85,6 +85,7 @@ class CameraTracker:
         self._current_bbox = None
         self._tracking_enabled = False
         self._last_error = None
+        self._last_move_result = None
 
         self._face_lock = FaceLock()
         self._target_size_ratio = 0.25
@@ -199,13 +200,22 @@ class CameraTracker:
             self._last_error = result
         try:
             # 중앙 정렬 = 손목 회전(팬=dry, 틸트=drx), 거리 유지 = 공구 Z 평행이동(dz)
-            self._manager.move_tool_offset(
+            move_error = self._manager.move_tool_offset(
                 0.0, 0.0, result["dz"],
                 drx_deg=result["d_tilt"], dry_deg=result["d_pan"], drz_deg=0.0,
                 vel=10.0,
             )
+            with self._lock:
+                self._last_move_result = {"error": move_error, "exception": None}
+            if move_error != 0:
+                # 이 SDK는 실패를 예외가 아니라 반환값(에러코드)으로 알려주므로,
+                # 여기서 안 찍으면 "왜 안 움직이지?" 상황이 화면에 전혀 안 보임.
+                print(f"[카메라 트래킹] 보정 이동 반환값(에러): {move_error} "
+                      f"(0이 아니면 실패 - 로봇 활성화 여부/안전정지 상태를 확인하세요)")
         except Exception as e:
-            print("[카메라 트래킹] 보정 이동 실패:", e)
+            with self._lock:
+                self._last_move_result = {"error": None, "exception": str(e)}
+            print("[카메라 트래킹] 보정 이동 실패(예외):", e)
 
     # ------------------------------------------------------------------
     def get_jpeg(self):
@@ -245,6 +255,7 @@ class CameraTracker:
         with self._lock:
             face_found = self._current_bbox is not None
             err = self._last_error or {}
+            move = self._last_move_result or {}
         return {
             "opened": self.is_open(),
             "index": self._index,
@@ -254,6 +265,11 @@ class CameraTracker:
             "size_ratio": round(err.get("size_ratio", 0), 4),
             "error_x_px": err.get("error_x_px", 0),
             "error_y_px": err.get("error_y_px", 0),
+            "d_pan": round(err.get("d_pan", 0), 3),
+            "d_tilt": round(err.get("d_tilt", 0), 3),
+            "dz": round(err.get("dz", 0), 3),
+            "last_move_error": move.get("error"),
+            "last_move_exception": move.get("exception"),
             "invert": dict(self.invert),
             "max_step_deg": self.max_step_deg,
             "max_step_mm": self.max_step_mm,

@@ -262,11 +262,20 @@ async function pollCameraState() {
     box.textContent = "카메라를 아직 열지 않았습니다.";
     return;
   }
+  const moveLine = d.last_move_exception
+    ? `⚠ 이동 명령 예외: ${d.last_move_exception}`
+    : (d.last_move_error === null || d.last_move_error === undefined)
+      ? "아직 보정 명령을 보낸 적 없음"
+      : (d.last_move_error === 0
+          ? "정상 (반환값 0)"
+          : `⚠ 로봇이 거부함 (반환값 ${d.last_move_error} - 활성화/안전정지 상태 확인)`);
   box.textContent =
     `트래킹 상태    : ${d.tracking_enabled ? "실행 중" : "정지"}\n` +
     `얼굴 인식됨    : ${d.face_found ? "예" : "아니오 (사람 탐색 중)"}\n` +
     `중심 오차(px)  : x=${d.error_x_px}, y=${d.error_y_px}\n` +
     `크기비율/목표  : ${d.size_ratio} / ${d.target_size_ratio}\n` +
+    `보낸 보정량    : pan=${d.d_pan}°, tilt=${d.d_tilt}°, dz=${d.dz}mm\n` +
+    `마지막 이동 결과: ${moveLine}\n` +
     `반전 팬/틸트/거리 : ${d.invert.pan}/${d.invert.tilt}/${d.invert.z}\n` +
     `최대 회전폭    : ${d.max_step_deg}°\n` +
     `최대 이동폭    : ${d.max_step_mm} mm`;
