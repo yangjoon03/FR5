@@ -94,6 +94,32 @@ def _hand_bbox(landmarks, frame_w, frame_h):
     return (int(x0), int(y0), int(x1 - x0), int(y1 - y0))
 
 
+def _landmarks_px(landmarks, frame_w, frame_h):
+    """MediaPipe 정규화 랜드마크(0~1) 21개를 픽셀 (x,y) 좌표 리스트로 변환."""
+    return [(int(lm.x * frame_w), int(lm.y * frame_h)) for lm in landmarks]
+
+
+# 손 관절(마디) 연결 순서 - MediaPipe 손 랜드마크의 고정된 구조
+# 0=손목, 1~4=엄지, 5~8=검지, 9~12=중지, 13~16=약지, 17~20=소지
+_HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),          # 엄지
+    (0, 5), (5, 6), (6, 7), (7, 8),          # 검지
+    (5, 9), (9, 10), (10, 11), (11, 12),     # 중지
+    (9, 13), (13, 14), (14, 15), (15, 16),   # 약지
+    (13, 17), (17, 18), (18, 19), (19, 20),  # 소지
+    (0, 17),                                  # 손목 - 소지 밑동 (손바닥 테두리)
+]
+
+
+def _draw_hand_skeleton(frame, landmarks_px, color=(0, 255, 0)):
+    """21개 관절점 + 관절 사이 연결선을 프레임에 그려서 '마디마디'를 눈으로 보이게 함."""
+    for a, b in _HAND_CONNECTIONS:
+        cv2.line(frame, landmarks_px[a], landmarks_px[b], color, 2)
+    for i, (x, y) in enumerate(landmarks_px):
+        radius = 6 if i == 0 else 4  # 손목(0번)만 좀 더 크게 표시
+        cv2.circle(frame, (x, y), radius, color, -1)
+
+
 class CameraTracker:
     def __init__(self, robot_manager):
         self._manager = robot_manager
@@ -194,7 +220,9 @@ class CameraTracker:
     def _detect_right_hand_candidates(self, frame, w, h):
         """
         이번 프레임에서 검출된 손들 중 오른손만 골라서
-        [(bbox, gesture_label), ...] 리스트로 반환.
+        [(bbox, gesture_label, landmarks_px), ...] 리스트로 반환.
+        landmarks_px: 21개 관절점의 픽셀 좌표 - 화면에 마디마디를 그려서
+        보여주는 용도 (실제 이동 계산에는 bbox만 사용).
         """
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -207,9 +235,10 @@ class CameraTracker:
                 continue
             if handedness[0].category_name != wanted_label:
                 continue
-            bbox = _hand_bbox(result.hand_landmarks[i], w, h)
+            landmarks = result.hand_landmarks[i]
+            bbox = _hand_bbox(landmarks, w, h)
             gesture = result.gestures[i][0].category_name if result.gestures[i] else None
-            candidates.append((bbox, gesture))
+            candidates.append((bbox, gesture, _landmarks_px(landmarks, w, h)))
         return candidates
 
     def _capture_loop(self):
@@ -225,9 +254,9 @@ class CameraTracker:
 
             h, w = frame.shape[:2]
             candidates = self._detect_right_hand_candidates(frame, w, h)
-            gesture_by_bbox = {bbox: g for bbox, g in candidates}
-            bbox = self._hand_lock.update([bbox for bbox, _ in candidates])
-            gesture = gesture_by_bbox.get(bbox)
+            info_by_bbox = {bbox: (g, lm) for bbox, g, lm in candidates}
+            bbox = self._hand_lock.update([bbox for bbox, _, _ in candidates])
+            gesture, landmarks_px = info_by_bbox.get(bbox, (None, None))
 
             if bbox is None:
                 self._smooth_bbox = None  # 사람/손이 바뀌었을 수도 있으니 평활화 값도 리셋
@@ -250,7 +279,9 @@ class CameraTracker:
             if smooth is not None:
                 x, y, bw, bh = smooth
                 color = (0, 255, 0) if is_open_hand else (0, 165, 255)
-                cv2.rectangle(frame, (x, y), (x + bw, y + bh), color, 2)
+                if landmarks_px is not None:
+                    _draw_hand_skeleton(frame, landmarks_px, color)  # 마디마디(관절+뼈대) 표시
+                cv2.rectangle(frame, (x, y), (x + bw, y + bh), color, 1)
                 cv2.putText(frame, str(gesture), (x, max(0, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             label = "TRACKING" if self._tracking_enabled else "PREVIEW"
             cv2.putText(frame, label, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
