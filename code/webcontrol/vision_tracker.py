@@ -46,8 +46,8 @@ from mediapipe.tasks.python import vision as mp_vision
 
 from face_tracking import FaceLock, compute_correction
 
-_HARD_MAX_STEP_MM = 3.0    # z(거리) 이동 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음 (ServoCart는 훨씬 자주 호출되므로 한 틱당 상한을 MoveL 방식보다 낮춤)
-_HARD_MAX_STEP_DEG = 2.0   # 팬/틸트 회전 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
+_HARD_MAX_STEP_MM = 15.0   # z(거리) 이동 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
+_HARD_MAX_STEP_DEG = 10.0  # 팬/틸트 회전 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음 (현재 미사용)
 
 _OPEN_GESTURE = "Open_Palm"
 _STOP_GESTURES = {"Closed_Fist"}  # 이 제스처면 명시적으로 "정지" 신호로 취급
@@ -139,22 +139,20 @@ class CameraTracker:
         self._smoothing_alpha = 0.35    # 낮을수록 부드럽지만 반응이 느려짐
         self._current_gesture = None
         self._tracking_enabled = False
-        self._servo_active = False      # ServoMoveStart()~ServoMoveEnd() 세션이 열려있는지
         self._last_error = None
         self._last_move_result = None
 
         self._hand_lock = FaceLock()  # 이름만 FaceLock, bbox 하나만 있으면 뭐든 추적 가능한 범용 로직
         self._target_size_ratio = 0.25
 
-        # ServoCart 스트리밍 방식은 MoveL보다 훨씬 자주(짧은 주기로) 호출되므로,
-        # 한 틱당 보정량은 예전 MoveL 방식 기본값보다 작게 잡음(전체 속도는
-        # 오히려 더 빠르고 부드러움 - 자주 조금씩 vs 가끔 많이의 차이)
-        self.gains = {"pan": 0.03, "tilt": 0.03, "z": 60.0}  # pan/tilt: °/px, z: mm/size_ratio오차
-        self.max_step_deg = 0.4
-        self.max_step_mm = 0.6
+        # 기초 버전: 팬/틸트(회전)는 일단 비활성화, 거리(z)만 사용
+        # (MoveL + offset_flag=2, blendR로 부드럽게 - 수동 J6 버튼과 동일 방식)
+        self.gains = {"pan": 0.03, "tilt": 0.03, "z": 60.0}  # pan/tilt: °/px, z: mm/size_ratio오차 (pan/tilt는 현재 미사용)
+        self.max_step_deg = 2.0
+        self.max_step_mm = 3.0
         self.invert = {"pan": False, "tilt": False, "z": False}
         self.invert_handedness = False  # 실기에서 반대 손이 잡히면 켜기 (모듈 docstring 참고)
-        self.tick_interval = 0.05  # ServoCart용 - 20Hz, 카메라/추론 속도가 이보다 느리면 그 속도로 자연 제한됨
+        self.tick_interval = 0.25
 
     # ------------------------------------------------------------------
     def _load_recognizer(self):
@@ -193,7 +191,6 @@ class CameraTracker:
     def close(self):
         self._running = False
         self._tracking_enabled = False
-        self._end_servo_session()
         thread = self._capture_thread
         self._capture_thread = None
         if thread is not None:
@@ -316,14 +313,14 @@ class CameraTracker:
         with self._lock:
             self._last_error = result
         try:
-            # 중앙 정렬 = 손목 회전(팬=dry, 틸트=drx), 거리 유지 = 공구 Z 평행이동(dz)
-            # ServoCart 스트리밍 - servo_move_start()로 연 세션 안에서 아주
-            # 짧은 주기로 계속 미세 보정만 보냄 (MoveL처럼 매번 목표 자세를
-            # 새로 계산/재생하지 않아 지연이 훨씬 적음)
-            move_error = self._manager.servo_cart_offset(
+            # 기초 버전: 팬/틸트(회전)는 일단 빼고, 거리(전후 이동, dz)만
+            # 처리 - 손이 가까워지면 후진, 멀어지면 전진. 이미 수동
+            # "공구 방향 이동(J6)" 버튼에서 검증된 것과 완전히 같은
+            # 메커니즘(MoveL + offset_flag=2)을 그대로 재사용.
+            move_error = self._manager.move_tool_offset(
                 0.0, 0.0, result["dz"],
-                drx_deg=result["d_tilt"], dry_deg=result["d_pan"], drz_deg=0.0,
-                cmd_t=self.tick_interval,
+                drx_deg=0.0, dry_deg=0.0, drz_deg=0.0,
+                vel=10.0, blend_r=10.0,
             )
             with self._lock:
                 self._last_move_result = {"error": move_error, "exception": None}
@@ -353,24 +350,10 @@ class CameraTracker:
     def start_tracking(self):
         if not self.is_open():
             raise RuntimeError("먼저 카메라를 열어야 합니다.")
-        if not self._servo_active:
-            error = self._manager.servo_move_start()
-            if error != 0:
-                raise RuntimeError(f"ServoMoveStart 실패 (반환값 {error}) - 로봇 활성화 상태를 확인하세요.")
-            self._servo_active = True
         self._tracking_enabled = True
 
     def stop_tracking(self):
         self._tracking_enabled = False
-        self._end_servo_session()
-
-    def _end_servo_session(self):
-        if self._servo_active:
-            try:
-                self._manager.servo_move_end()
-            except Exception as e:
-                print("[손 트래킹] ServoMoveEnd 실패:", e)
-            self._servo_active = False
 
     def update_config(self, invert_pan=None, invert_tilt=None, invert_z=None,
                       invert_handedness=None, max_step_deg=None, max_step_mm=None):
