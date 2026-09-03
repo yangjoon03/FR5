@@ -68,7 +68,8 @@ class FaceLock:
         self.lost_count = 0
 
 
-def compute_correction(frame_w, frame_h, bbox, target_size_ratio, gains, max_step_deg, max_step_mm, invert):
+def compute_correction(frame_w, frame_h, bbox, target_size_ratio, gains, max_step_deg, max_step_mm, invert,
+                        deadzone_px=20, deadzone_ratio=0.02):
     """
     현재 얼굴 위치/크기와 목표(화면 중앙, 목표 크기)의 차이를 로봇의 툴
     좌표계 기준 회전량(팬/틸트, °)과 전후 이동량(거리 유지, mm)으로 변환합니다.
@@ -97,6 +98,11 @@ def compute_correction(frame_w, frame_h, bbox, target_size_ratio, gains, max_ste
     (팬이 Ry가 아니라 Rz일 수도 있음), 실기에서 반대로 돌거나 엉뚱한
     축으로 돌면 invert로 뒤집어서 맞추면 됩니다.
 
+    - deadzone_px: 팬/틸트용 - 중심 오차가 이 픽셀 이하면 흔들림(jitter)으로
+      보고 아예 0으로 취급 (사람이 가만히 있는데도 얼굴 인식 박스가
+      프레임마다 몇 픽셀씩 떨려서 로봇이 계속 미세하게 움직이는 걸 방지)
+    - deadzone_ratio: z(거리)용 - 크기비율 오차가 이 이하면 마찬가지로 0 취급
+
     반환: dict(d_pan, d_tilt, dz, size_ratio, error_x_px, error_y_px)
     """
     x, y, w, h = bbox
@@ -111,15 +117,18 @@ def compute_correction(frame_w, frame_h, bbox, target_size_ratio, gains, max_ste
     size_ratio = w / float(frame_w)
     err_size = target_size_ratio - size_ratio
 
+    def deadzone(v, threshold):
+        return 0.0 if abs(v) < threshold else v
+
     def clamp_deg(v):
         return max(-max_step_deg, min(max_step_deg, v))
 
     def clamp_mm(v):
         return max(-max_step_mm, min(max_step_mm, v))
 
-    d_pan = clamp_deg(err_x_px * gains["pan"])
-    d_tilt = clamp_deg(err_y_px * gains["tilt"])
-    dz = clamp_mm(err_size * gains["z"])
+    d_pan = clamp_deg(deadzone(err_x_px, deadzone_px) * gains["pan"])
+    d_tilt = clamp_deg(deadzone(err_y_px, deadzone_px) * gains["tilt"])
+    dz = clamp_mm(deadzone(err_size, deadzone_ratio) * gains["z"])
 
     if invert.get("pan"):
         d_pan = -d_pan

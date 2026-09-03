@@ -82,7 +82,9 @@ class CameraTracker:
         self._latest_jpeg = None
         self._frame_w = 0
         self._frame_h = 0
-        self._current_bbox = None
+        self._current_bbox = None       # 화면 표시/락 판단용 - 검출된 원본 박스
+        self._smooth_bbox = None        # 보정 계산용 - 프레임간 흔들림을 줄인 값
+        self._smoothing_alpha = 0.35    # 낮을수록 부드럽지만 반응이 느려짐
         self._tracking_enabled = False
         self._last_error = None
         self._last_move_result = None
@@ -168,10 +170,25 @@ class CameraTracker:
             detected = self._detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
             bbox = self._face_lock.update([tuple(int(v) for v in f) for f in detected])
 
+            if bbox is None:
+                self._smooth_bbox = None  # 사람이 바뀌었을 수도 있으니 평활화 값도 리셋
+            else:
+                a = self._smoothing_alpha
+                if self._smooth_bbox is None:
+                    self._smooth_bbox = tuple(float(v) for v in bbox)
+                else:
+                    self._smooth_bbox = tuple(
+                        a * new + (1 - a) * old for new, old in zip(bbox, self._smooth_bbox)
+                    )
+
+            # 이후 표시/보정 계산은 전부 평활화된 값을 씀 (화면에 그리는 박스도
+            # 덜 떨려 보이고, 보정 계산도 프레임 하나의 튀는 값에 안 흔들림)
+            smooth = None if self._smooth_bbox is None else tuple(int(v) for v in self._smooth_bbox)
+
             cx, cy = w // 2, h // 2
             cv2.drawMarker(frame, (cx, cy), (0, 255, 255), cv2.MARKER_CROSS, 20, 2)
-            if bbox is not None:
-                x, y, bw, bh = bbox
+            if smooth is not None:
+                x, y, bw, bh = smooth
                 cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 2)
             label = "TRACKING" if self._tracking_enabled else "PREVIEW"
             cv2.putText(frame, label, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
@@ -183,13 +200,13 @@ class CameraTracker:
             with self._lock:
                 self._latest_jpeg = jpeg
                 self._frame_w, self._frame_h = w, h
-                self._current_bbox = bbox
+                self._current_bbox = smooth
 
             now = time.time()
-            if self._tracking_enabled and bbox is not None and (now - last_tick) >= self.tick_interval:
+            if self._tracking_enabled and smooth is not None and (now - last_tick) >= self.tick_interval:
                 last_tick = now
-                self._send_correction(w, h, bbox)
-            elif bbox is None:
+                self._send_correction(w, h, smooth)
+            elif smooth is None:
                 last_tick = now  # 사람을 놓친 동안은 보정 명령을 보내지 않음
 
     def _send_correction(self, w, h, bbox):
