@@ -209,8 +209,12 @@ class RobotManager:
             current = self._current_tcp_pose_locked()
             offset = [float(dx_mm), float(dy_mm), float(dz_mm),
                       float(drx_deg), float(dry_deg), float(drz_deg)]
-            return self.robot.MoveL(current, tool=self.default_tool, user=self.default_user, vel=vel,
-                                     offset_flag=2, offset_pos=offset, blendR=blend_r)
+            print(f"[move_tool_offset] current={current} tool={self.default_tool} user={self.default_user} "
+                  f"vel={vel} offset_flag=2 offset_pos={offset} blendR={blend_r}")
+            error = self.robot.MoveL(current, tool=self.default_tool, user=self.default_user, vel=vel,
+                                      offset_flag=2, offset_pos=offset, blendR=blend_r)
+            print(f"[move_tool_offset] -> 반환값 {error}")
+            return error
 
     # ------------------------------------------------------------------
     # 실시간 서보 스트리밍 (ServoCart) - 카메라 트래킹처럼 아주 짧은 주기로
