@@ -314,13 +314,16 @@ class CameraTracker:
             self._last_error = result
         try:
             # 기초 버전: 팬/틸트(회전)는 일단 빼고, 거리(전후 이동, dz)만
-            # 처리 - 손이 가까워지면 후진, 멀어지면 전진. 이미 수동
-            # "공구 방향 이동(J6)" 버튼에서 검증된 것과 완전히 같은
-            # 메커니즘(MoveL + offset_flag=2)을 그대로 재사용.
+            # 처리 - 손이 가까워지면 후진, 멀어지면 전진. 수동 "공구 방향
+            # 이동(J6)" 버튼과 완전히 동일한 파라미터(blend_r 기본값=-1,
+            # 블로킹)로 맞춤 - blendR(평활 반경)이 실제 이동 거리(수 mm)보다
+            # 커서 컨트롤러가 거부하는 것으로 추정되는 에러(반환값 14)가
+            # 있었음. 나중에 다시 부드럽게 이어붙이려면 blend_r을
+            # max_step_mm보다 작게 줘야 함.
             move_error = self._manager.move_tool_offset(
                 0.0, 0.0, result["dz"],
                 drx_deg=0.0, dry_deg=0.0, drz_deg=0.0,
-                vel=10.0, blend_r=10.0,
+                vel=10.0,
             )
             with self._lock:
                 self._last_move_result = {"error": move_error, "exception": None}
