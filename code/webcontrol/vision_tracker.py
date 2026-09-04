@@ -152,7 +152,7 @@ class CameraTracker:
         self.max_step_mm = 3.0
         self.invert = {"pan": False, "tilt": False, "z": False}
         self.invert_handedness = False  # 실기에서 반대 손이 잡히면 켜기 (모듈 docstring 참고)
-        self.tick_interval = 0.25
+        self.tick_interval = 0.1  # MoveL은 블로킹이라 실제 주기는 이동 완료 시간에 좌우됨 - 이건 상한일 뿐
 
     # ------------------------------------------------------------------
     def _load_recognizer(self):
@@ -313,17 +313,15 @@ class CameraTracker:
         with self._lock:
             self._last_error = result
         try:
-            # 기초 버전: 팬/틸트(회전)는 일단 빼고, 거리(전후 이동, dz)만
-            # 처리 - 손이 가까워지면 후진, 멀어지면 전진. 수동 "공구 방향
-            # 이동(J6)" 버튼과 완전히 동일한 파라미터(blend_r 기본값=-1,
-            # 블로킹)로 맞춤 - blendR(평활 반경)이 실제 이동 거리(수 mm)보다
-            # 커서 컨트롤러가 거부하는 것으로 추정되는 에러(반환값 14)가
-            # 있었음. 나중에 다시 부드럽게 이어붙이려면 blend_r을
-            # max_step_mm보다 작게 줘야 함.
+            # 팬/틸트(회전)는 일단 빼고 거리(전후 이동, dz)만 처리.
+            # blend_r을 이동거리(max_step_mm)보다 작게 줘서, 매번 완전히
+            # 멈췄다 재출발하지 않고 이어붙임 - blendR=-1(완전정지)일 때보다
+            # 훨씬 실시간처럼 느껴짐. (이전에 blend_r=10 > max_step_mm=3일
+            # 때 에러가 났던 적이 있어 이번엔 max_step_mm보다 확실히 작게 둠)
             move_error = self._manager.move_tool_offset(
                 0.0, 0.0, result["dz"],
                 drx_deg=0.0, dry_deg=0.0, drz_deg=0.0,
-                vel=10.0,
+                vel=15.0, blend_r=1.0,
             )
             with self._lock:
                 self._last_move_result = {"error": move_error, "exception": None}

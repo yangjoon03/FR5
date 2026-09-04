@@ -276,7 +276,7 @@ async function pollCameraState() {
     `손 모양        : ${d.gesture || "-"} ${d.is_open_hand ? "(편 손 - 이동함)" : "(주먹/기타 - 정지)"}\n` +
     `중심 오차(px)  : x=${d.error_x_px}, y=${d.error_y_px}\n` +
     `크기비율/목표  : ${d.size_ratio} / ${d.target_size_ratio}\n` +
-    `보낸 보정량    : pan=${d.d_pan}°, tilt=${d.d_tilt}°, dz=${d.dz}mm\n` +
+    `계산된 보정량  : dz=${d.dz}mm (거리만 전송 - pan=${d.d_pan}°/tilt=${d.d_tilt}°는 계산만 되고 현재 미전송)\n` +
     `마지막 이동 결과: ${moveLine}\n` +
     `반전 팬/틸트/거리 : ${d.invert.pan}/${d.invert.tilt}/${d.invert.z}\n` +
     `최대 회전폭    : ${d.max_step_deg}°\n` +
