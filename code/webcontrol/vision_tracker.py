@@ -13,10 +13,13 @@ face_tracking일 뿐 그대로 재사용)에 위임합니다.
   bbox만 있으면 되니 손에도 그대로 씀).
 - **손을 편 상태(Open_Palm)일 때만** 보정 명령을 보냄. 주먹(Closed_Fist)을
   쥐거나 다른 모양이면 그 순간 아무 명령도 안 보내고 가만히 있음(정지).
-- 거리 유지는 **조그(JOG)**로 처리 - 목표보다 멀면 전진 조그 시작,
-  가까우면 후진 조그 시작, 목표 범위 안에 들어오면 정지. MoveL을 매번
-  반복 호출하는 대신 "필요한 동안 계속 부드럽게 움직이다가 멈춤" 방식이라
-  훨씬 실시간처럼 느껴짐. 중앙 정렬(팬/틸트)은 현재 비활성화 상태.
+- 거리(전후)/수평(좌우)/수직(위아래) 오차를 **한 번에 계산해서 MoveL
+  오프셋(offset_flag=2) 한 번으로 합쳐 보냅니다** (`_send_combined_correction`).
+  처음엔 세 축을 조그(JOG)로 각각 따로 돌렸는데, 이 컨트롤러가 한
+  좌표계 안에서 여러 축을 동시에 조그로 돌리는 걸 지원하지 않아
+  대각선 이동이 안 되는 것을 확인했습니다 - MoveL은 원래 3D 직선(=
+  대각선 포함) 이동이 기본이라 이 방식으로 바꿨습니다. 중앙 정렬
+  (손목 회전, 팬/틸트)은 현재 비활성화 상태 - 평행이동만 동작함.
 
 ⚠️ 중요: MediaPipe의 손 좌우(handedness) 판정은 "입력 영상이 좌우反전된
 (셀카처럼 거울에 비친) 영상"이라는 가정 하에 이루어집니다 (공식 문서에
@@ -50,11 +53,6 @@ from face_tracking import FaceLock, compute_correction
 
 _HARD_MAX_STEP_MM = 15.0   # z(거리) 이동 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
 _HARD_MAX_STEP_DEG = 10.0  # 팬/틸트 회전 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음 (현재 미사용)
-
-# StartJOG의 max_dis(단일 조그 최대 이동거리, 500mm)에 도달하면 로봇이
-# 자체적으로 멈추는데, 이 주기보다 자주 같은 방향 조그를 새로고침해서
-# 소프트웨어 상태와 로봇 실제 상태가 어긋나지 않게 함.
-_JOG_REFRESH_SEC = 1.5
 
 _OPEN_GESTURE = "Open_Palm"
 _STOP_GESTURES = {"Closed_Fist"}  # 이 제스처면 명시적으로 "정지" 신호로 취급
@@ -152,38 +150,28 @@ class CameraTracker:
         self._hand_lock = FaceLock()  # 이름만 FaceLock, bbox 하나만 있으면 뭐든 추적 가능한 범용 로직
         self._target_size_ratio = 0.25
 
-        # 거리(전후)와 수평(좌우) 추적 둘 다 매번 조금씩 이동 명령을 다시
-        # 보내는 대신, 조그(JOG)로 "필요한 방향으로 계속 움직이다가,
-        # 목표에 도달하거나 방향이 바뀌면 정지"하는 방식을 씀 - 훨씬
-        # 부드럽고 실시간처럼 느껴짐 (MoveL을 짧은 주기로 반복 호출하는
-        # 것보다 나음).
-        # ⚠️ 세 축(전후=Z=nb3, 좌우=X=nb1, 위아래=Y=nb2)을 동시에 조그로
-        # 돌리는 건 이번이 처음이라, 이 컨트롤러가 한 좌표계 안에서 여러
-        # 축 조그를 동시에 지원하는지(하나를 멈추면 다른 축도 같이
-        # 멈추는 건 아닌지) 실기 검증이 안 됐습니다. 처음엔 저속으로
-        # 서로 간섭 안 하는지 반드시 확인하세요.
-        self._jog_direction = None  # None | "fwd"(전진) | "back"(후진) - 거리(Z) 조그 방향
-        self._horizontal_jog_direction = None  # None | "left" | "right" - 좌우(X) 조그 방향
-        self._vertical_jog_direction = None  # None | "up" | "down" - 위아래(Y) 조그 방향
-        self._jog_started_at = 0.0
-        self._horizontal_jog_started_at = 0.0
-        self._vertical_jog_started_at = 0.0
-        self.jog_vel = 15.0  # 조그 속도 백분율
-        # 데드존(이 범위 안이면 "도달/중앙"으로 보고 정지) - 너무 좁으면
-        # 손이 살짝만 흔들려도 계속 "아직 아님"으로 판정돼서 로봇이 쉬지
-        # 않고 계속 쫓아가려는 것처럼 느껴짐. 로봇이 조그로 따라가는
-        # 속도(jog_vel)보다 사람 손이 훨씬 빨리 움직이기 때문에, 데드존을
-        # 넉넉하게 잡아야 "대충 맞으면 쉬는" 자연스러운 느낌이 남.
+        # 거리/수평/수직을 조그(JOG) 세 축으로 각각 따로 돌리는 방식을
+        # 써봤는데, 이 컨트롤러는 한 좌표계 안에서 여러 축을 동시에
+        # 조그로 돌리는 걸 지원하지 않는 것으로 확인됐습니다(대각선
+        # 이동이 안 되고 축이 서로 간섭함). 그래서 세 값을 한 번에
+        # 합쳐서 MoveL 오프셋(offset_flag=2) 한 번으로 보내는 방식으로
+        # 바꿨습니다 - MoveL은 원래 3D 직선(대각선 포함) 이동이 기본이라
+        # 세 축이 자연스럽게 한 번에 움직입니다.
+        self._was_moving = False  # 직전 틱에 실제로 보정을 보냈는지 - 정지 전환 감지용
+        self.move_vel = 15.0  # 이동 속도 백분율
+        # 데드존(이 범위 안이면 "도달/중앙"으로 보고 그 축은 0으로 취급) -
+        # 너무 좁으면 손이 살짝만 흔들려도 계속 "아직 아님"으로 판정돼서
+        # 로봇이 쉬지 않고 계속 움직이려는 것처럼 느껴짐.
         self.distance_deadzone_ratio = 0.04
-        self.horizontal_deadzone_px = 80  # 화면 중앙 기준 이 픽셀 이내면 정지(중앙에 있다고 봄)
+        self.horizontal_deadzone_px = 80  # 화면 중앙 기준 이 픽셀 이내면 그 축은 0
         self.vertical_deadzone_px = 80
 
         self.invert = {"pan": False, "tilt": False, "z": False, "horizontal": False, "vertical": False}
         self.invert_handedness = False  # 실기에서 반대 손이 잡히면 켜기 (모듈 docstring 참고)
-        self.tick_interval = 0.15  # 방향 재판단 주기 (조그 자체는 계속 이어짐, 이 주기로 멈출지만 확인)
+        self.tick_interval = 0.12  # 보정 명령을 다시 계산해서 보내는 주기
 
         # 팬/틸트(회전)는 현재 비활성화 - 다시 켤 때 필요한 값들
-        self.gains = {"pan": 0.03, "tilt": 0.03, "z": 60.0}
+        self.gains = {"pan": 0.03, "tilt": 0.03, "z": 60.0, "horizontal": 0.08, "vertical": 0.08}
         self.max_step_deg = 2.0
         self.max_step_mm = 3.0
 
@@ -224,7 +212,7 @@ class CameraTracker:
     def close(self):
         self._running = False
         self._tracking_enabled = False
-        self._force_jog_stop()
+        self._abort_motion_if_active()
         thread = self._capture_thread
         self._capture_thread = None
         if thread is not None:
@@ -342,165 +330,84 @@ class CameraTracker:
             should_move = self._tracking_enabled and smooth is not None and is_open_hand
             if should_move and (now - last_tick) >= self.tick_interval:
                 last_tick = now
-                self._update_distance_jog(w, h, smooth)
-                self._update_horizontal_jog(w, smooth)
-                self._update_vertical_jog(h, smooth)
+                self._send_combined_correction(w, h, smooth)
             elif not should_move:
                 last_tick = now
-                # 조그는 명령을 안 보낸다고 저절로 멈추지 않으므로(MoveL과
-                # 다름), 주먹을 쥐었거나 손을 놓치거나 트래킹을 끄면
-                # 반드시 명시적으로 정지시켜야 함.
-                if self._jog_direction is not None:
-                    self._set_jog_direction(None)
-                if self._horizontal_jog_direction is not None:
-                    self._set_horizontal_jog_direction(None)
-                if self._vertical_jog_direction is not None:
-                    self._set_vertical_jog_direction(None)
+                # MoveL은 한 번 보내고 나면 그 이동이 끝나면 알아서 멈추지만,
+                # 주먹을 쥐거나 손을 놓친 "그 순간" 마침 이동이 진행 중일
+                # 수도 있으니, 직전까지 움직이고 있었다면 즉시 정지시킴.
+                self._abort_motion_if_active()
 
-    def _update_distance_jog(self, w, h, bbox):
+    def _send_combined_correction(self, w, h, bbox):
         """
-        MoveL을 반복 호출하는 대신 조그(JOG)로 "필요한 방향으로 계속
-        움직이다가, 목표 거리 근처에 오면 정지"하는 방식. 방향이 바뀌지
-        않는 한 별도 명령 없이 로봇은 계속 부드럽게 움직입니다 - 이 함수는
-        그저 "지금 방향이 맞는지, 멈춰야 하는지"만 주기적으로 재판단합니다.
+        거리(전후)/수평(좌우)/수직(위아래) 오차를 한 번에 계산해서 공구
+        좌표계 오프셋 하나로 합쳐 MoveL 한 번에 보냅니다. 세 축을 각각
+        조그로 따로 돌리면(이전 방식) 이 컨트롤러에서 대각선 이동이 안
+        되는 것을 확인해서, MoveL의 원래 특성(3D 직선 = 대각선 포함)을
+        그대로 활용하는 방식으로 바꿨습니다.
         """
-        size_ratio = bbox[2] / float(w)
+        x, y, bw, bh = bbox
+        size_ratio = bw / float(w)
         err_size = self._target_size_ratio - size_ratio  # 양수=목표보다 작음(멀리 있음)->전진 필요
+        face_cx = x + bw / 2.0
+        face_cy = y + bh / 2.0
+        err_x_px = face_cx - (w / 2.0)  # 양수 = 손이 화면 오른쪽
+        err_y_px = face_cy - (h / 2.0)  # 양수 = 손이 화면 아래쪽
+
+        max_mm = min(self.max_step_mm, _HARD_MAX_STEP_MM)
+
+        def clamp(v):
+            return max(-max_mm, min(max_mm, v))
+
+        dz = 0.0 if abs(err_size) < self.distance_deadzone_ratio else clamp(err_size * self.gains["z"])
+        dx = 0.0 if abs(err_x_px) < self.horizontal_deadzone_px else clamp(err_x_px * self.gains["horizontal"])
+        dy = 0.0 if abs(err_y_px) < self.vertical_deadzone_px else clamp(err_y_px * self.gains["vertical"])
+
+        if self.invert.get("z"):
+            dz = -dz
+        if self.invert.get("horizontal"):
+            dx = -dx
+        if self.invert.get("vertical"):
+            dy = -dy
+
         with self._lock:
-            self._last_error = {"size_ratio": size_ratio}
+            self._last_error = {"size_ratio": size_ratio, "dx": dx, "dy": dy, "dz": dz}
 
-        if abs(err_size) < self.distance_deadzone_ratio:
-            desired = None  # 목표 거리 범위 안 - 정지
-        elif err_size > 0:
-            desired = "fwd"  # 목표보다 멀리 있음 -> 전진해서 다가감
-        else:
-            desired = "back"  # 목표보다 가까이 있음 -> 후진해서 멀어짐
+        if dx == 0.0 and dy == 0.0 and dz == 0.0:
+            self._was_moving = False
+            return  # 세 축 다 데드존 안 - 보낼 것 없음
 
-        if desired == self._jog_direction:
-            # 이미 같은 방향인데, StartJOG의 max_dis(단일 조그 최대
-            # 이동거리)에 도달하면 로봇이 자체적으로 멈춰버릴 수 있음 -
-            # 그때 여기서 그냥 아무것도 안 하면 소프트웨어는 "계속
-            # 움직이는 중"이라고 착각한 채 로봇은 멈춰있게 됨(손이 아주
-            # 많이 멀어질 때 "안 따라옴"으로 느껴지던 원인). 그래서
-            # 방향이 같아도 주기적으로 새로 StartJOG를 보내 새로고침함.
-            if desired is not None and (time.time() - self._jog_started_at) >= _JOG_REFRESH_SEC:
-                self._set_jog_direction(desired, is_refresh=True)
-            return
-
-        self._set_jog_direction(desired)
-
-    def _set_jog_direction(self, desired, is_refresh=False):
         try:
-            if self._jog_direction is not None and not is_refresh:
-                error = self._manager.jog_stop(ref=5)  # 5 = 공구좌표계 점동 정지
-                if error != 0:
-                    print(f"[손 트래킹] StopJOG 반환값(에러): {error}")
-            if desired is not None:
-                direction = 1 if desired == "fwd" else 0
-                error = self._manager.jog_start(ref=4, nb=3, direction=direction, max_dis=500.0, vel=self.jog_vel)
-                self._jog_started_at = time.time()
-                with self._lock:
-                    self._last_move_result = {"error": error, "exception": None}
-                if error != 0:
-                    print(f"[손 트래킹] StartJOG 반환값(에러): {error} "
-                          f"(0이 아니면 실패 - 로봇 활성화 여부/안전정지 상태를 확인하세요)")
-            else:
-                with self._lock:
-                    self._last_move_result = {"error": 0, "exception": None}
-            self._jog_direction = desired
+            # blend_r을 max_step_mm보다 작게 둬서 매번 완전히 멈췄다
+            # 재출발하지 않고 부드럽게 이어붙임 (blend_r > 이동거리일 때
+            # 컨트롤러가 거부하는 문제를 겪은 적 있어 항상 작게 유지).
+            move_error = self._manager.move_tool_offset(
+                dx, dy, dz, drx_deg=0.0, dry_deg=0.0, drz_deg=0.0,
+                vel=self.move_vel, blend_r=1.0,
+            )
+            self._was_moving = True
+            with self._lock:
+                self._last_move_result = {"error": move_error, "exception": None}
+            if move_error != 0:
+                # 이 SDK는 실패를 예외가 아니라 반환값(에러코드)으로 알려주므로,
+                # 여기서 안 찍으면 "왜 안 움직이지?" 상황이 화면에 전혀 안 보임.
+                print(f"[손 트래킹] 보정 이동 반환값(에러): {move_error} "
+                      f"(0이 아니면 실패 - 로봇 활성화 여부/안전정지 상태를 확인하세요)")
         except Exception as e:
             with self._lock:
                 self._last_move_result = {"error": None, "exception": str(e)}
-            print("[손 트래킹] 조그 방향 전환 실패(예외):", e)
-            self._jog_direction = None
+            print("[손 트래킹] 보정 이동 실패(예외):", e)
 
-    def _update_horizontal_jog(self, w, bbox):
-        """
-        거리(Z) 조그와 같은 방식으로, 손이 화면 중앙 기준 좌/우 어디
-        있는지 보고 수평(공구 X축) 조그를 시작/정지합니다.
-        """
-        x, y, bw, bh = bbox
-        face_cx = x + bw / 2.0
-        err_x_px = face_cx - (w / 2.0)  # 양수 = 손이 화면 오른쪽
-
-        if abs(err_x_px) < self.horizontal_deadzone_px:
-            desired = None  # 중앙 근처 - 정지
-        elif err_x_px > 0:
-            desired = "right"
-        else:
-            desired = "left"
-
-        if desired is not None and self.invert.get("horizontal"):
-            desired = "left" if desired == "right" else "right"
-
-        if desired == self._horizontal_jog_direction:
-            if desired is not None and (time.time() - self._horizontal_jog_started_at) >= _JOG_REFRESH_SEC:
-                self._set_horizontal_jog_direction(desired, is_refresh=True)
-            return
-
-        self._set_horizontal_jog_direction(desired)
-
-    def _set_horizontal_jog_direction(self, desired, is_refresh=False):
-        try:
-            if self._horizontal_jog_direction is not None and not is_refresh:
-                error = self._manager.jog_stop(ref=5)  # 5 = 공구좌표계 점동 정지
-                if error != 0:
-                    print(f"[손 트래킹] StopJOG(수평) 반환값(에러): {error}")
-            if desired is not None:
-                direction = 1 if desired == "right" else 0
-                error = self._manager.jog_start(ref=4, nb=1, direction=direction, max_dis=500.0, vel=self.jog_vel)
-                self._horizontal_jog_started_at = time.time()
-                if error != 0:
-                    print(f"[손 트래킹] StartJOG(수평) 반환값(에러): {error} "
-                          f"(0이 아니면 실패 - 로봇 활성화 여부/안전정지 상태를 확인하세요)")
-            self._horizontal_jog_direction = desired
-        except Exception as e:
-            print("[손 트래킹] 수평 조그 방향 전환 실패(예외):", e)
-            self._horizontal_jog_direction = None
-
-    def _update_vertical_jog(self, h, bbox):
-        """
-        거리(Z)/수평(X) 조그와 같은 방식으로, 손이 화면 중앙 기준 위/아래
-        어디 있는지 보고 수직(공구 Y축) 조그를 시작/정지합니다.
-        """
-        x, y, bw, bh = bbox
-        face_cy = y + bh / 2.0
-        err_y_px = face_cy - (h / 2.0)  # 양수 = 손이 화면 아래쪽
-
-        if abs(err_y_px) < self.vertical_deadzone_px:
-            desired = None  # 중앙 근처 - 정지
-        elif err_y_px > 0:
-            desired = "down"
-        else:
-            desired = "up"
-
-        if desired is not None and self.invert.get("vertical"):
-            desired = "up" if desired == "down" else "down"
-
-        if desired == self._vertical_jog_direction:
-            if desired is not None and (time.time() - self._vertical_jog_started_at) >= _JOG_REFRESH_SEC:
-                self._set_vertical_jog_direction(desired, is_refresh=True)
-            return
-
-        self._set_vertical_jog_direction(desired)
-
-    def _set_vertical_jog_direction(self, desired, is_refresh=False):
-        try:
-            if self._vertical_jog_direction is not None and not is_refresh:
-                error = self._manager.jog_stop(ref=5)  # 5 = 공구좌표계 점동 정지
-                if error != 0:
-                    print(f"[손 트래킹] StopJOG(수직) 반환값(에러): {error}")
-            if desired is not None:
-                direction = 1 if desired == "down" else 0
-                error = self._manager.jog_start(ref=4, nb=2, direction=direction, max_dis=500.0, vel=self.jog_vel)
-                self._vertical_jog_started_at = time.time()
-                if error != 0:
-                    print(f"[손 트래킹] StartJOG(수직) 반환값(에러): {error} "
-                          f"(0이 아니면 실패 - 로봇 활성화 여부/안전정지 상태를 확인하세요)")
-            self._vertical_jog_direction = desired
-        except Exception as e:
-            print("[손 트래킹] 수직 조그 방향 전환 실패(예외):", e)
-            self._vertical_jog_direction = None
+    def _abort_motion_if_active(self):
+        """직전 틱까지 실제로 보정 이동을 보내고 있었다면(=지금 이동 중일
+        가능성), 손을 놓치거나 주먹을 쥔 순간 즉시 멈춤 - 항상 즉시
+        응답하는 전용 커넥션(StopMotion) 사용."""
+        if self._was_moving:
+            try:
+                self._manager.stop()
+            except Exception as e:
+                print("[손 트래킹] 강제 정지 실패:", e)
+            self._was_moving = False
 
     # ------------------------------------------------------------------
     def get_jpeg(self):
@@ -522,27 +429,12 @@ class CameraTracker:
 
     def stop_tracking(self):
         self._tracking_enabled = False
-        self._force_jog_stop()
-
-    def _force_jog_stop(self):
-        """조그는 명령을 안 보낸다고 저절로 안 멈추므로, 트래킹 정지/카메라
-        닫기 시점에 확실히 멈춰야 함 - 항상 즉시 응답하는 전용 커넥션 사용.
-        ImmStopJOG()는 축 구분 없이 전체 조그를 멈추는 전역 명령이라
-        세 축(거리/수평/수직) 상태를 한 번에 정리함."""
-        if (self._jog_direction is not None or self._horizontal_jog_direction is not None
-                or self._vertical_jog_direction is not None):
-            try:
-                self._manager.jog_stop_immediate()
-            except Exception as e:
-                print("[손 트래킹] 조그 강제 정지 실패:", e)
-            self._jog_direction = None
-            self._horizontal_jog_direction = None
-            self._vertical_jog_direction = None
+        self._abort_motion_if_active()
 
     def update_config(self, invert_pan=None, invert_tilt=None, invert_z=None, invert_horizontal=None,
                       invert_vertical=None, invert_handedness=None, max_step_deg=None, max_step_mm=None,
                       distance_deadzone_ratio=None, horizontal_deadzone_px=None, vertical_deadzone_px=None,
-                      jog_vel=None):
+                      move_vel=None):
         if invert_pan is not None:
             self.invert["pan"] = bool(invert_pan)
         if invert_tilt is not None:
@@ -565,8 +457,8 @@ class CameraTracker:
             self.horizontal_deadzone_px = max(0.0, float(horizontal_deadzone_px))
         if vertical_deadzone_px is not None:
             self.vertical_deadzone_px = max(0.0, float(vertical_deadzone_px))
-        if jog_vel is not None:
-            self.jog_vel = max(1.0, min(float(jog_vel), 100.0))
+        if move_vel is not None:
+            self.move_vel = max(1.0, min(float(move_vel), 100.0))
 
     def state(self):
         with self._lock:
@@ -583,9 +475,9 @@ class CameraTracker:
             "is_open_hand": gesture == _OPEN_GESTURE,
             "target_size_ratio": round(self._target_size_ratio, 4),
             "size_ratio": round(err.get("size_ratio", 0), 4),
-            "jog_direction": self._jog_direction,  # None | "fwd" | "back"
-            "horizontal_jog_direction": self._horizontal_jog_direction,  # None | "left" | "right"
-            "vertical_jog_direction": self._vertical_jog_direction,  # None | "up" | "down"
+            "dx": round(err.get("dx", 0), 3),
+            "dy": round(err.get("dy", 0), 3),
+            "dz": round(err.get("dz", 0), 3),
             "last_move_error": move.get("error"),
             "last_move_exception": move.get("exception"),
             "invert": dict(self.invert),
@@ -595,5 +487,5 @@ class CameraTracker:
             "distance_deadzone_ratio": self.distance_deadzone_ratio,
             "horizontal_deadzone_px": self.horizontal_deadzone_px,
             "vertical_deadzone_px": self.vertical_deadzone_px,
-            "jog_vel": self.jog_vel,
+            "move_vel": self.move_vel,
         }
