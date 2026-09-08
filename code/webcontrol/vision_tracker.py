@@ -161,9 +161,14 @@ class CameraTracker:
         self._horizontal_jog_direction = None  # None | "left" | "right" - 좌우(X) 조그 방향
         self._vertical_jog_direction = None  # None | "up" | "down" - 위아래(Y) 조그 방향
         self.jog_vel = 15.0  # 조그 속도 백분율
-        self.distance_deadzone_ratio = 0.02  # 이 안에 들어오면 정지(목표 거리에 도달)
-        self.horizontal_deadzone_px = 40  # 화면 중앙 기준 이 픽셀 이내면 정지(중앙에 있다고 봄)
-        self.vertical_deadzone_px = 40
+        # 데드존(이 범위 안이면 "도달/중앙"으로 보고 정지) - 너무 좁으면
+        # 손이 살짝만 흔들려도 계속 "아직 아님"으로 판정돼서 로봇이 쉬지
+        # 않고 계속 쫓아가려는 것처럼 느껴짐. 로봇이 조그로 따라가는
+        # 속도(jog_vel)보다 사람 손이 훨씬 빨리 움직이기 때문에, 데드존을
+        # 넉넉하게 잡아야 "대충 맞으면 쉬는" 자연스러운 느낌이 남.
+        self.distance_deadzone_ratio = 0.04
+        self.horizontal_deadzone_px = 80  # 화면 중앙 기준 이 픽셀 이내면 정지(중앙에 있다고 봄)
+        self.vertical_deadzone_px = 80
 
         self.invert = {"pan": False, "tilt": False, "z": False, "horizontal": False, "vertical": False}
         self.invert_handedness = False  # 실기에서 반대 손이 잡히면 켜기 (모듈 docstring 참고)
@@ -512,7 +517,9 @@ class CameraTracker:
             self._vertical_jog_direction = None
 
     def update_config(self, invert_pan=None, invert_tilt=None, invert_z=None, invert_horizontal=None,
-                      invert_vertical=None, invert_handedness=None, max_step_deg=None, max_step_mm=None):
+                      invert_vertical=None, invert_handedness=None, max_step_deg=None, max_step_mm=None,
+                      distance_deadzone_ratio=None, horizontal_deadzone_px=None, vertical_deadzone_px=None,
+                      jog_vel=None):
         if invert_pan is not None:
             self.invert["pan"] = bool(invert_pan)
         if invert_tilt is not None:
@@ -529,6 +536,14 @@ class CameraTracker:
             self.max_step_deg = max(0.0, min(float(max_step_deg), _HARD_MAX_STEP_DEG))
         if max_step_mm is not None:
             self.max_step_mm = max(0.0, min(float(max_step_mm), _HARD_MAX_STEP_MM))
+        if distance_deadzone_ratio is not None:
+            self.distance_deadzone_ratio = max(0.0, min(float(distance_deadzone_ratio), 0.5))
+        if horizontal_deadzone_px is not None:
+            self.horizontal_deadzone_px = max(0.0, float(horizontal_deadzone_px))
+        if vertical_deadzone_px is not None:
+            self.vertical_deadzone_px = max(0.0, float(vertical_deadzone_px))
+        if jog_vel is not None:
+            self.jog_vel = max(1.0, min(float(jog_vel), 100.0))
 
     def state(self):
         with self._lock:
@@ -554,4 +569,8 @@ class CameraTracker:
             "invert_handedness": self.invert_handedness,
             "max_step_deg": self.max_step_deg,
             "max_step_mm": self.max_step_mm,
+            "distance_deadzone_ratio": self.distance_deadzone_ratio,
+            "horizontal_deadzone_px": self.horizontal_deadzone_px,
+            "vertical_deadzone_px": self.vertical_deadzone_px,
+            "jog_vel": self.jog_vel,
         }

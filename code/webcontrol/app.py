@@ -305,6 +305,10 @@ def api_camera_config():
         invert_horizontal=body.get("invert_horizontal"), invert_vertical=body.get("invert_vertical"),
         invert_handedness=body.get("invert_handedness"),
         max_step_deg=body.get("max_step_deg"), max_step_mm=body.get("max_step_mm"),
+        distance_deadzone_ratio=body.get("distance_deadzone_ratio"),
+        horizontal_deadzone_px=body.get("horizontal_deadzone_px"),
+        vertical_deadzone_px=body.get("vertical_deadzone_px"),
+        jog_vel=body.get("jog_vel"),
     )
     return ok(tracker.state())
 

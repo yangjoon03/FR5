@@ -253,6 +253,10 @@ function syncCameraConfigInputs(d) {
   document.getElementById("invert-handedness").checked = !!d.invert_handedness;
   document.getElementById("max-step-deg").value = d.max_step_deg;
   document.getElementById("max-step-mm").value = d.max_step_mm;
+  document.getElementById("deadzone-h").value = d.horizontal_deadzone_px;
+  document.getElementById("deadzone-v").value = d.vertical_deadzone_px;
+  document.getElementById("deadzone-dist").value = d.distance_deadzone_ratio;
+  document.getElementById("jog-vel").value = d.jog_vel;
 }
 
 async function pollCameraState() {
@@ -372,6 +376,16 @@ document.getElementById("btn-camera-config").addEventListener("click", async () 
     max_step_mm: Number(document.getElementById("max-step-mm").value),
   });
   if (data !== null) toast("설정 적용됨");
+});
+
+document.getElementById("btn-camera-deadzone").addEventListener("click", async () => {
+  const data = await api("/api/camera/config", {
+    horizontal_deadzone_px: Number(document.getElementById("deadzone-h").value),
+    vertical_deadzone_px: Number(document.getElementById("deadzone-v").value),
+    distance_deadzone_ratio: Number(document.getElementById("deadzone-dist").value),
+    jog_vel: Number(document.getElementById("jog-vel").value),
+  });
+  if (data !== null) toast("데드존/속도 적용됨");
 });
 
 // 상단 정지 버튼은 카메라 트래킹도 같이 멈춤 (서버 /api/stop 안에서 처리되지만,
