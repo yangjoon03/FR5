@@ -308,7 +308,7 @@ def api_camera_config():
         distance_deadzone_ratio=body.get("distance_deadzone_ratio"),
         horizontal_deadzone_px=body.get("horizontal_deadzone_px"),
         vertical_deadzone_px=body.get("vertical_deadzone_px"),
-        jog_vel=body.get("jog_vel"),
+        move_vel=body.get("move_vel"),
     )
     return ok(tracker.state())
 

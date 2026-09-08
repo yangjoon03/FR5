@@ -256,7 +256,7 @@ function syncCameraConfigInputs(d) {
   document.getElementById("deadzone-h").value = d.horizontal_deadzone_px;
   document.getElementById("deadzone-v").value = d.vertical_deadzone_px;
   document.getElementById("deadzone-dist").value = d.distance_deadzone_ratio;
-  document.getElementById("jog-vel").value = d.jog_vel;
+  document.getElementById("move-vel").value = d.move_vel;
 }
 
 async function pollCameraState() {
@@ -276,17 +276,12 @@ async function pollCameraState() {
       : (d.last_move_error === 0
           ? "정상 (반환값 0)"
           : `⚠ 로봇이 거부함 (반환값 ${d.last_move_error} - 활성화/안전정지 상태 확인)`);
-  const jogLabel = { fwd: "전진 중", back: "후진 중" }[d.jog_direction] || "정지";
-  const hJogLabel = { left: "좌측 이동 중", right: "우측 이동 중" }[d.horizontal_jog_direction] || "정지";
-  const vJogLabel = { up: "위로 이동 중", down: "아래로 이동 중" }[d.vertical_jog_direction] || "정지";
   box.textContent =
     `트래킹 상태    : ${d.tracking_enabled ? "실행 중" : "정지"}\n` +
     `왼손 인식됨    : ${d.hand_found ? "예" : "아니오 (탐색 중)"}\n` +
     `손 모양        : ${d.gesture || "-"} ${d.is_open_hand ? "(편 손 - 이동함)" : "(주먹/기타 - 정지)"}\n` +
     `크기비율/목표  : ${d.size_ratio} / ${d.target_size_ratio}\n` +
-    `조그 상태(거리): ${jogLabel}\n` +
-    `조그 상태(수평): ${hJogLabel}\n` +
-    `조그 상태(수직): ${vJogLabel}\n` +
+    `계산된 보정량  : dx=${d.dx}mm, dy=${d.dy}mm, dz=${d.dz}mm\n` +
     `마지막 명령 결과: ${moveLine}\n` +
     `반전 팬/틸트/거리 : ${d.invert.pan}/${d.invert.tilt}/${d.invert.z}\n` +
     `최대 회전폭    : ${d.max_step_deg}°\n` +
@@ -383,7 +378,7 @@ document.getElementById("btn-camera-deadzone").addEventListener("click", async (
     horizontal_deadzone_px: Number(document.getElementById("deadzone-h").value),
     vertical_deadzone_px: Number(document.getElementById("deadzone-v").value),
     distance_deadzone_ratio: Number(document.getElementById("deadzone-dist").value),
-    jog_vel: Number(document.getElementById("jog-vel").value),
+    move_vel: Number(document.getElementById("move-vel").value),
   });
   if (data !== null) toast("데드존/속도 적용됨");
 });

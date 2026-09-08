@@ -231,14 +231,14 @@
       <label>중앙 판정 범위(수평, px) <input id="deadzone-h" type="number" value="80" min="0" step="5" style="width:60px"></label>
       <label>중앙 판정 범위(수직, px) <input id="deadzone-v" type="number" value="80" min="0" step="5" style="width:60px"></label>
       <label>목표거리 판정 범위(비율) <input id="deadzone-dist" type="number" value="0.04" min="0" max="0.5" step="0.01" style="width:60px"></label>
-      <label>조그 속도(%) <input id="jog-vel" type="number" value="15" min="1" max="100" step="1" style="width:60px"></label>
+      <label>이동 속도(%) <input id="move-vel" type="number" value="15" min="1" max="100" step="1" style="width:60px"></label>
       <button id="btn-camera-deadzone" class="btn-secondary">데드존/속도 적용</button>
     </div>
     <p class="hint-text">
       중앙/목표거리 판정 범위(데드존)를 너무 좁게 잡으면, 손이 살짝만
       흔들려도 계속 "아직 안 맞음"으로 판단해서 로봇이 쉬지 않고 계속
-      쫓아가려는 것처럼 느껴집니다. 사람 손이 움직이는 속도에 비해
-      로봇이 조그로 따라가는 속도(조그 속도%)가 느릴수록, 데드존을
+      움직이려는 것처럼 느껴집니다. 사람 손이 움직이는 속도에 비해
+      로봇이 따라가는 속도(이동 속도%)가 느릴수록, 데드존을
       넉넉하게 잡아야 자연스럽게 느껴집니다.
     </p>
     <p class="hint-text">
