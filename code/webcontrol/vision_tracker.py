@@ -147,15 +147,23 @@ class CameraTracker:
         self._hand_lock = FaceLock()  # 이름만 FaceLock, bbox 하나만 있으면 뭐든 추적 가능한 범용 로직
         self._target_size_ratio = 0.25
 
-        # 거리(전후) 추적은 매번 조금씩 이동 명령을 다시 보내는 대신,
-        # 조그(JOG)로 "필요한 방향으로 계속 움직이다가, 목표 거리에
-        # 도달하거나 방향이 바뀌면 정지"하는 방식을 씀 - 훨씬 부드럽고
-        # 실시간처럼 느껴짐 (MoveL을 짧은 주기로 반복 호출하는 것보다 나음).
-        self._jog_direction = None  # None | "fwd"(전진) | "back"(후진) - 지금 조그 중인 방향
+        # 거리(전후)와 수평(좌우) 추적 둘 다 매번 조금씩 이동 명령을 다시
+        # 보내는 대신, 조그(JOG)로 "필요한 방향으로 계속 움직이다가,
+        # 목표에 도달하거나 방향이 바뀌면 정지"하는 방식을 씀 - 훨씬
+        # 부드럽고 실시간처럼 느껴짐 (MoveL을 짧은 주기로 반복 호출하는
+        # 것보다 나음).
+        # ⚠️ 두 축(전후=Z=nb3, 좌우=X=nb1)을 동시에 조그로 돌리는 건
+        # 이번이 처음이라, 이 컨트롤러가 한 좌표계 안에서 여러 축 조그를
+        # 동시에 지원하는지(하나를 멈추면 둘 다 멈추는 건 아닌지) 실기
+        # 검증이 안 됐습니다. 처음엔 저속으로 두 축이 서로 간섭 안 하는지
+        # 반드시 확인하세요.
+        self._jog_direction = None  # None | "fwd"(전진) | "back"(후진) - 거리(Z) 조그 방향
+        self._horizontal_jog_direction = None  # None | "left" | "right" - 좌우(X) 조그 방향
         self.jog_vel = 15.0  # 조그 속도 백분율
         self.distance_deadzone_ratio = 0.02  # 이 안에 들어오면 정지(목표 거리에 도달)
+        self.horizontal_deadzone_px = 40  # 화면 중앙 기준 이 픽셀 이내면 정지(중앙에 있다고 봄)
 
-        self.invert = {"pan": False, "tilt": False, "z": False}
+        self.invert = {"pan": False, "tilt": False, "z": False, "horizontal": False}
         self.invert_handedness = False  # 실기에서 반대 손이 잡히면 켜기 (모듈 docstring 참고)
         self.tick_interval = 0.15  # 방향 재판단 주기 (조그 자체는 계속 이어짐, 이 주기로 멈출지만 확인)
 
@@ -314,6 +322,7 @@ class CameraTracker:
             if should_move and (now - last_tick) >= self.tick_interval:
                 last_tick = now
                 self._update_distance_jog(w, h, smooth)
+                self._update_horizontal_jog(w, smooth)
             elif not should_move:
                 last_tick = now
                 # 조그는 명령을 안 보낸다고 저절로 멈추지 않으므로(MoveL과
@@ -321,6 +330,8 @@ class CameraTracker:
                 # 반드시 명시적으로 정지시켜야 함.
                 if self._jog_direction is not None:
                     self._set_jog_direction(None)
+                if self._horizontal_jog_direction is not None:
+                    self._set_horizontal_jog_direction(None)
 
     def _update_distance_jog(self, w, h, bbox):
         """
@@ -370,6 +381,47 @@ class CameraTracker:
             print("[손 트래킹] 조그 방향 전환 실패(예외):", e)
             self._jog_direction = None
 
+    def _update_horizontal_jog(self, w, bbox):
+        """
+        거리(Z) 조그와 같은 방식으로, 손이 화면 중앙 기준 좌/우 어디
+        있는지 보고 수평(공구 X축) 조그를 시작/정지합니다.
+        """
+        x, y, bw, bh = bbox
+        face_cx = x + bw / 2.0
+        err_x_px = face_cx - (w / 2.0)  # 양수 = 손이 화면 오른쪽
+
+        if abs(err_x_px) < self.horizontal_deadzone_px:
+            desired = None  # 중앙 근처 - 정지
+        elif err_x_px > 0:
+            desired = "right"
+        else:
+            desired = "left"
+
+        if desired is not None and self.invert.get("horizontal"):
+            desired = "left" if desired == "right" else "right"
+
+        if desired == self._horizontal_jog_direction:
+            return
+
+        self._set_horizontal_jog_direction(desired)
+
+    def _set_horizontal_jog_direction(self, desired):
+        try:
+            if self._horizontal_jog_direction is not None:
+                error = self._manager.jog_stop(ref=5)  # 5 = 공구좌표계 점동 정지
+                if error != 0:
+                    print(f"[손 트래킹] StopJOG(수평) 반환값(에러): {error}")
+            if desired is not None:
+                direction = 1 if desired == "right" else 0
+                error = self._manager.jog_start(ref=4, nb=1, direction=direction, max_dis=500.0, vel=self.jog_vel)
+                if error != 0:
+                    print(f"[손 트래킹] StartJOG(수평) 반환값(에러): {error} "
+                          f"(0이 아니면 실패 - 로봇 활성화 여부/안전정지 상태를 확인하세요)")
+            self._horizontal_jog_direction = desired
+        except Exception as e:
+            print("[손 트래킹] 수평 조그 방향 전환 실패(예외):", e)
+            self._horizontal_jog_direction = None
+
     # ------------------------------------------------------------------
     def get_jpeg(self):
         with self._lock:
@@ -394,15 +446,18 @@ class CameraTracker:
 
     def _force_jog_stop(self):
         """조그는 명령을 안 보낸다고 저절로 안 멈추므로, 트래킹 정지/카메라
-        닫기 시점에 확실히 멈춰야 함 - 항상 즉시 응답하는 전용 커넥션 사용."""
-        if self._jog_direction is not None:
+        닫기 시점에 확실히 멈춰야 함 - 항상 즉시 응답하는 전용 커넥션 사용.
+        ImmStopJOG()는 축 구분 없이 전체 조그를 멈추는 전역 명령이라
+        두 축(거리/수평) 상태를 한 번에 정리함."""
+        if self._jog_direction is not None or self._horizontal_jog_direction is not None:
             try:
                 self._manager.jog_stop_immediate()
             except Exception as e:
                 print("[손 트래킹] 조그 강제 정지 실패:", e)
             self._jog_direction = None
+            self._horizontal_jog_direction = None
 
-    def update_config(self, invert_pan=None, invert_tilt=None, invert_z=None,
+    def update_config(self, invert_pan=None, invert_tilt=None, invert_z=None, invert_horizontal=None,
                       invert_handedness=None, max_step_deg=None, max_step_mm=None):
         if invert_pan is not None:
             self.invert["pan"] = bool(invert_pan)
@@ -410,6 +465,8 @@ class CameraTracker:
             self.invert["tilt"] = bool(invert_tilt)
         if invert_z is not None:
             self.invert["z"] = bool(invert_z)
+        if invert_horizontal is not None:
+            self.invert["horizontal"] = bool(invert_horizontal)
         if invert_handedness is not None:
             self.invert_handedness = bool(invert_handedness)
         if max_step_deg is not None:
@@ -433,6 +490,7 @@ class CameraTracker:
             "target_size_ratio": round(self._target_size_ratio, 4),
             "size_ratio": round(err.get("size_ratio", 0), 4),
             "jog_direction": self._jog_direction,  # None | "fwd" | "back"
+            "horizontal_jog_direction": self._horizontal_jog_direction,  # None | "left" | "right"
             "last_move_error": move.get("error"),
             "last_move_exception": move.get("exception"),
             "invert": dict(self.invert),

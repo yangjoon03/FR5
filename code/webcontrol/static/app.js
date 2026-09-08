@@ -248,6 +248,7 @@ function syncCameraConfigInputs(d) {
   document.getElementById("invert-pan").checked = !!d.invert.pan;
   document.getElementById("invert-tilt").checked = !!d.invert.tilt;
   document.getElementById("invert-z").checked = !!d.invert.z;
+  document.getElementById("invert-horizontal").checked = !!d.invert.horizontal;
   document.getElementById("invert-handedness").checked = !!d.invert_handedness;
   document.getElementById("max-step-deg").value = d.max_step_deg;
   document.getElementById("max-step-mm").value = d.max_step_mm;
@@ -271,12 +272,14 @@ async function pollCameraState() {
           ? "정상 (반환값 0)"
           : `⚠ 로봇이 거부함 (반환값 ${d.last_move_error} - 활성화/안전정지 상태 확인)`);
   const jogLabel = { fwd: "전진 중", back: "후진 중" }[d.jog_direction] || "정지";
+  const hJogLabel = { left: "좌측 이동 중", right: "우측 이동 중" }[d.horizontal_jog_direction] || "정지";
   box.textContent =
     `트래킹 상태    : ${d.tracking_enabled ? "실행 중" : "정지"}\n` +
     `오른손 인식됨  : ${d.hand_found ? "예" : "아니오 (탐색 중)"}\n` +
     `손 모양        : ${d.gesture || "-"} ${d.is_open_hand ? "(편 손 - 이동함)" : "(주먹/기타 - 정지)"}\n` +
     `크기비율/목표  : ${d.size_ratio} / ${d.target_size_ratio}\n` +
-    `조그 상태      : ${jogLabel}\n` +
+    `조그 상태(거리): ${jogLabel}\n` +
+    `조그 상태(수평): ${hJogLabel}\n` +
     `마지막 명령 결과: ${moveLine}\n` +
     `반전 팬/틸트/거리 : ${d.invert.pan}/${d.invert.tilt}/${d.invert.z}\n` +
     `최대 회전폭    : ${d.max_step_deg}°\n` +
@@ -359,6 +362,7 @@ document.getElementById("btn-camera-config").addEventListener("click", async () 
     invert_pan: document.getElementById("invert-pan").checked,
     invert_tilt: document.getElementById("invert-tilt").checked,
     invert_z: document.getElementById("invert-z").checked,
+    invert_horizontal: document.getElementById("invert-horizontal").checked,
     invert_handedness: document.getElementById("invert-handedness").checked,
     max_step_deg: Number(document.getElementById("max-step-deg").value),
     max_step_mm: Number(document.getElementById("max-step-mm").value),
