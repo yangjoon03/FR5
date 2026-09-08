@@ -19,7 +19,7 @@ python3 app.py
 - `geometry.py` — 현재 위치 기준으로 원/호/다각형/타원/직선/회전 목표 좌표를 계산
 - `robot_manager.py` — `fairino.Robot`을 감싸는 스레드-세이프 래퍼. 메인 커넥션(상태조회/활성화/이동/조그)은 `_rpc_lock`으로 직렬화하고, 정지/일시정지/재개/조그즉시정지는 완전히 별도의 XML-RPC 커넥션(`_stop_lock`)으로 분리해서 메인 커넥션이 긴 이동 명령으로 바빠도 항상 즉시 처리됨
 - `face_tracking.py` — 위치 → 로봇 이동량 변환 순수 로직 (얼굴이든 손이든 bbox 하나만 받으면 되는 범용 로직이라 이름만 남음, 카메라 없이 단위 테스트 가능)
-- `vision_tracker.py` — OpenCV로 카메라를 열고 MediaPipe로 오른손+손모양(제스처)을 검출/추적, "편 손"일 때만 조그(`robot_manager.jog_start`/`jog_stop`)로 거리 추적
+- `vision_tracker.py` — OpenCV로 카메라를 열고 MediaPipe로 왼손+손모양(제스처)을 검출/추적, "편 손"일 때만 조그(`robot_manager.jog_start`/`jog_stop`)로 거리 추적
 - `app.py` — Flask REST API
 - `static/` — 프론트엔드 (index.html / style.css / app.js)
 
@@ -52,7 +52,7 @@ python3 app.py
 | `POST /api/camera/open {index}` / `close` | 카메라 열기/닫기 |
 | `GET /api/camera/stream` | MJPEG 실시간 미리보기 (손 박스 + 인식된 손모양 텍스트 표시됨) |
 | `GET /api/camera/state` | 트래킹 상태(인식여부/손모양/크기비율/조그방향 등) |
-| `POST /api/camera/calibrate` | 지금 보이는 오른손 크기를 "유지할 거리" 기준으로 저장 |
+| `POST /api/camera/calibrate` | 지금 보이는 왼손 크기를 "유지할 거리" 기준으로 저장 |
 | `POST /api/camera/config {invert_pan,invert_tilt,invert_z,invert_horizontal,invert_vertical,invert_handedness,max_step_deg,max_step_mm}` | 거리/수평/수직/좌우손 반전 등 설정 (팬/틸트 관련 값은 현재 비활성 기능용으로 남겨둔 것) |
 | `POST /api/camera/track/start` / `track/stop` | 손 추적(로봇 이동) 시작/정지 (수동 스위치 - 아래 제스처 게이트와 별개) |
 
@@ -77,10 +77,10 @@ python3 app.py
 (처음엔 `MoveL`을 반복 호출하는 방식으로 만들었다가, 매번 완전히
 멈췄다 재출발하느라 굼뜨고 반응이 느려서 조그 방식으로 바꿨습니다).
 
-## 카메라 오른손 트래킹 동작 방식
+## 카메라 왼손 트래킹 동작 방식
 
 1. 매 프레임 MediaPipe `GestureRecognizer`로 손을 검출 — 위치(21개 랜드마크)와 손모양(제스처: `Open_Palm`, `Closed_Fist` 등), 좌우손(`Left`/`Right`)까지 한 모델이 같이 알려줌.
-2. 검출된 손 중 **`Right`(오른손)로 분류된 것만** 후보로 남김. MediaPipe의 좌우손 판정은 "거울에 비친(셀카) 영상" 기준이라 로봇 카메라(반전 안 된 일반 영상)에서는 실제 오른손이 `Left`로 잡힐 수 있음 — `invert_handedness`로 반전 가능.
+2. 검출된 손 중 **`Left`(왼손)로 분류된 것만** 후보로 남김. MediaPipe의 좌우손 판정은 "거울에 비친(셀카) 영상" 기준이라 로봇 카메라(반전 안 된 일반 영상)에서는 실제 왼손/오른손과 라벨이 반대로 나올 수 있음 — `invert_handedness`로 반전 가능.
 3. `face_tracking.FaceLock`(이름만 얼굴용, bbox면 뭐든 추적하는 범용 로직)이 그 후보들 중 **한 손만** 계속 추적 — 처음엔 가장 큰 손을 잡고, 그 다음부터는 이전 위치와 가장 가까운 것만 같은 손으로 인정. 잠깐(기본 10프레임) 안 보여도 마지막 위치를 유지하고, 그보다 오래 안 보이면 놓친 것으로 확정해 다음 프레임부터 다시 찾음.
 4. **손을 편 상태(`Open_Palm`)일 때만** 0.15초마다 지금 손 크기(화면 너비 대비 손 박스 너비 비율)와 캘리브레이션해둔 목표 크기를 비교합니다 (`vision_tracker._update_distance_jog`):
    - 손이 목표보다 작음(멀리 있음) → 아직 전진 조그 중이 아니면 `jog_start(ref=4, nb=3, dir=1)`(공구 Z축, 전진) 시작
@@ -106,7 +106,7 @@ python3 app.py
 
 ⚠️ **mediapipe 버전을 절대 올리지 마세요.** 최신 1.x(pip 기본 설치)는 `GestureRecognizer.recognize()` 호출 시 이 macOS 환경에서 매번 강제 종료(세그폴트급 crash, 파이썬 `try/except`로도 못 잡음 — 서버 프로세스 자체가 죽음)하는 것을 실제로 재현해서 확인했습니다. `requirements.txt`에 정상 동작을 확인한 `mediapipe==0.10.14`로 고정해뒀습니다.
 
-⚠️ 코드 자체는 로봇 미연결 환경(카메라도 없음)에서 작성돼서, 개발 중엔 (1) 좌표/제스처 게이트 계산 로직 단위 테스트, (2) 빈 프레임으로 실제 MediaPipe 모델을 끝까지 돌려 크래시 없음 확인, (3) 가짜 인식 결과로 오른손 필터링·좌우반전·조그 상태 전환(전진→정지→후진→강제정지) 로직 검증까지만 할 수 있었습니다. 이후 실제 로봇으로 거리(조그) 추적 동작을 확인했고, 그 과정에서 겪은 문제와 원인은 아래와 같습니다.
+⚠️ 코드 자체는 로봇 미연결 환경(카메라도 없음)에서 작성돼서, 개발 중엔 (1) 좌표/제스처 게이트 계산 로직 단위 테스트, (2) 빈 프레임으로 실제 MediaPipe 모델을 끝까지 돌려 크래시 없음 확인, (3) 가짜 인식 결과로 왼손 필터링·좌우반전·조그 상태 전환(전진→정지→후진→강제정지) 로직 검증까지만 할 수 있었습니다. 이후 실제 로봇으로 거리(조그) 추적 동작을 확인했고, 그 과정에서 겪은 문제와 원인은 아래와 같습니다.
 - `blendR`(MoveL 평활 반경)이 실제 이동 거리보다 크면 컨트롤러가 이동을 거부함(반환값 14) — 지금은 조그 방식이라 해당 없음.
 - `ServoCart`는 공식 권장 호출 주기(1~1.6ms)보다 훨씬 느리게(수십 ms) 호출하면 로봇이 아예 반응하지 않음 — 그래서 이 프로젝트에서는 거리 추적에 ServoCart 대신 조그를 씀.
 - 중앙 정렬(손목 회전, 팬/틸트)은 아직 실기 검증 전이라 비활성화 상태로 남겨뒀습니다.

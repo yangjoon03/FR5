@@ -240,7 +240,7 @@ document.querySelectorAll(".shape-btn").forEach(btn => {
 });
 
 // ------------------------------------------------------------------
-// 카메라 오른손 트래킹
+// 카메라 왼손 트래킹
 // ------------------------------------------------------------------
 let cameraPollTimer = null;
 
@@ -277,7 +277,7 @@ async function pollCameraState() {
   const vJogLabel = { up: "위로 이동 중", down: "아래로 이동 중" }[d.vertical_jog_direction] || "정지";
   box.textContent =
     `트래킹 상태    : ${d.tracking_enabled ? "실행 중" : "정지"}\n` +
-    `오른손 인식됨  : ${d.hand_found ? "예" : "아니오 (탐색 중)"}\n` +
+    `왼손 인식됨    : ${d.hand_found ? "예" : "아니오 (탐색 중)"}\n` +
     `손 모양        : ${d.gesture || "-"} ${d.is_open_hand ? "(편 손 - 이동함)" : "(주먹/기타 - 정지)"}\n` +
     `크기비율/목표  : ${d.size_ratio} / ${d.target_size_ratio}\n` +
     `조그 상태(거리): ${jogLabel}\n` +

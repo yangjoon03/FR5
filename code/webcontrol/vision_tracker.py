@@ -1,5 +1,5 @@
 """
-카메라를 열어서 (오른)손을 검출/추적하고, 손이 펴져있으면 로봇에게 보정
+카메라를 열어서 (왼)손을 검출/추적하고, 손이 펴져있으면 로봇에게 보정
 이동을 보내는 모듈. 실제 카메라·손 인식 로직(MediaPipe)이 여기 들어있고,
 좌표/보정량 계산 자체는 face_tracking.py(순수 로직, 카메라 없이도 테스트
 가능 - 얼굴이든 손이든 bbox 하나만 받으면 되는 범용 로직이라 이름만
@@ -8,7 +8,7 @@ face_tracking일 뿐 그대로 재사용)에 위임합니다.
 동작 방식
 - MediaPipe GestureRecognizer로 프레임마다 손을 찾고, 손모양(제스처)까지
   같이 분류합니다 (별도 로직 없이 모델이 바로 "편 손"/"주먹" 등을 알려줌).
-- 여러 손이 보여도 "오른손(Right)"만 후보로 걸러낸 뒤, 그 중 하나만 계속
+- 여러 손이 보여도 "왼손"만 후보로 걸러낸 뒤, 그 중 하나만 계속
   추적합니다(FaceLock 재사용 - 원래 얼굴용으로 짠 "한 개체만 유지" 로직인데
   bbox만 있으면 되니 손에도 그대로 씀).
 - **손을 편 상태(Open_Palm)일 때만** 보정 명령을 보냄. 주먹(Closed_Fist)을
@@ -21,9 +21,9 @@ face_tracking일 뿐 그대로 재사용)에 위임합니다.
 ⚠️ 중요: MediaPipe의 손 좌우(handedness) 판정은 "입력 영상이 좌우反전된
 (셀카처럼 거울에 비친) 영상"이라는 가정 하에 이루어집니다 (공식 문서에
 명시됨). 로봇에 달린 카메라는 보통 거울처럼 반전되지 않은 일반 영상을
-주므로, 실제로는 결과가 반대로(내가 든 오른손이 "Left"로) 나올 가능성이
-높습니다. 그래서 어느 쪽을 필터링할지 뒤집을 수 있는 옵션을 뒀습니다
-(invert_handedness) - 실기에서 반대로 반응하면 이걸 켜세요.
+주므로, 실제 왼손/오른손과 MediaPipe가 매기는 "Left"/"Right" 라벨이
+반대로 나올 가능성이 있습니다. 그래서 어느 쪽을 필터링할지 뒤집을 수
+있는 옵션을 뒀습니다(invert_handedness) - 엉뚱한 손이 잡히면 이걸 켜세요.
 
 ⚠️ mediapipe 버전 주의: 최신 1.x(pip 기본 설치 버전)는 이 GestureRecognizer
 기능이 macOS에서 즉시 크래시(Segfault급 강제종료, 파이썬 예외로도 못 잡음)
@@ -34,7 +34,7 @@ face_tracking일 뿐 그대로 재사용)에 위임합니다.
 - max_step_deg(팬/틸트) 기본 2°, 서버에서 10°를 하드 상한으로 강제
 - max_step_mm(거리 유지) 기본 3mm, 서버에서 15mm를 하드 상한으로 강제
 - tick_interval(보정 명령을 보내는 주기) 기본 0.25초
-- 손이 안 보이거나, 오른손이 아니거나, 편 손이 아니면 어떤 보정도 안 보냄
+- 손이 안 보이거나, 왼손이 아니거나, 편 손이 아니면 어떤 보정도 안 보냄
 - "트래킹 시작" 버튼을 눌러야만 실제로 로봇에 명령이 나감
 """
 import os
@@ -186,7 +186,7 @@ class CameraTracker:
         options = mp_vision.GestureRecognizerOptions(
             base_options=base_options,
             running_mode=mp_vision.RunningMode.IMAGE,
-            num_hands=4,  # 여러 손/여러 사람이 보여도 그 중 오른손만 골라내기 위해 넉넉히
+            num_hands=4,  # 여러 손/여러 사람이 보여도 그 중 왼손만 골라내기 위해 넉넉히
         )
         return mp_vision.GestureRecognizer.create_from_options(options)
 
@@ -240,9 +240,9 @@ class CameraTracker:
         return self._index
 
     # ------------------------------------------------------------------
-    def _detect_right_hand_candidates(self, frame, w, h):
+    def _detect_left_hand_candidates(self, frame, w, h):
         """
-        이번 프레임에서 검출된 손들 중 오른손만 골라서
+        이번 프레임에서 검출된 손들 중 왼손만 골라서
         [(bbox, gesture_label, landmarks_px), ...] 리스트로 반환.
         landmarks_px: 21개 관절점의 픽셀 좌표 - 화면에 마디마디를 그려서
         보여주는 용도 (실제 이동 계산에는 bbox만 사용).
@@ -251,7 +251,13 @@ class CameraTracker:
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = self._recognizer.recognize(mp_image)
 
-        wanted_label = "Left" if self.invert_handedness else "Right"
+        # MediaPipe의 좌우손 라벨은 "거울(셀카)에 비친 영상"이라는 가정 하에
+        # 매겨지는데, 이 카메라 영상은 반전이 안 돼 있어서 실제 어느 손이
+        # 어느 라벨로 잡힐지는 실기에서 확인하기 전엔 확실하지 않습니다.
+        # 예전에는 기본값이 "Right" 라벨을 찾았는데(그게 실제로 오른손인지
+        # 왼손인지는 검증 안 됨), 이번에 왼손 테스트 요청으로 반대 라벨을
+        # 기본값으로 바꿨습니다. 엉뚱한 손이 잡히면 invert_handedness로 뒤집으세요.
+        wanted_label = "Right" if self.invert_handedness else "Left"
         candidates = []
         for i, handedness in enumerate(result.handedness):
             if not handedness:
@@ -276,7 +282,7 @@ class CameraTracker:
                 frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
 
             h, w = frame.shape[:2]
-            candidates = self._detect_right_hand_candidates(frame, w, h)
+            candidates = self._detect_left_hand_candidates(frame, w, h)
             info_by_bbox = {bbox: (g, lm) for bbox, g, lm in candidates}
             bbox = self._hand_lock.update([bbox for bbox, _, _ in candidates])
             gesture, landmarks_px = info_by_bbox.get(bbox, (None, None))
@@ -477,7 +483,7 @@ class CameraTracker:
         with self._lock:
             bbox, w = self._current_bbox, self._frame_w
         if bbox is None or not w:
-            raise RuntimeError("현재 인식된 오른손이 없어 거리 기준을 설정할 수 없습니다. 손이 보이는 상태에서 다시 시도하세요.")
+            raise RuntimeError("현재 인식된 왼손이 없어 거리 기준을 설정할 수 없습니다. 손이 보이는 상태에서 다시 시도하세요.")
         self._target_size_ratio = bbox[2] / float(w)
         return self._target_size_ratio
 
