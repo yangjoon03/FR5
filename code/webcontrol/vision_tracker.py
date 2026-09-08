@@ -51,6 +51,11 @@ from face_tracking import FaceLock, compute_correction
 _HARD_MAX_STEP_MM = 15.0   # z(거리) 이동 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음
 _HARD_MAX_STEP_DEG = 10.0  # 팬/틸트 회전 - 사용자가 설정값을 아무리 높여도 이걸 넘지 않음 (현재 미사용)
 
+# StartJOG의 max_dis(단일 조그 최대 이동거리, 500mm)에 도달하면 로봇이
+# 자체적으로 멈추는데, 이 주기보다 자주 같은 방향 조그를 새로고침해서
+# 소프트웨어 상태와 로봇 실제 상태가 어긋나지 않게 함.
+_JOG_REFRESH_SEC = 1.5
+
 _OPEN_GESTURE = "Open_Palm"
 _STOP_GESTURES = {"Closed_Fist"}  # 이 제스처면 명시적으로 "정지" 신호로 취급
 
@@ -160,6 +165,9 @@ class CameraTracker:
         self._jog_direction = None  # None | "fwd"(전진) | "back"(후진) - 거리(Z) 조그 방향
         self._horizontal_jog_direction = None  # None | "left" | "right" - 좌우(X) 조그 방향
         self._vertical_jog_direction = None  # None | "up" | "down" - 위아래(Y) 조그 방향
+        self._jog_started_at = 0.0
+        self._horizontal_jog_started_at = 0.0
+        self._vertical_jog_started_at = 0.0
         self.jog_vel = 15.0  # 조그 속도 백분율
         # 데드존(이 범위 안이면 "도달/중앙"으로 보고 정지) - 너무 좁으면
         # 손이 살짝만 흔들려도 계속 "아직 아님"으로 판정돼서 로봇이 쉬지
@@ -369,19 +377,28 @@ class CameraTracker:
             desired = "back"  # 목표보다 가까이 있음 -> 후진해서 멀어짐
 
         if desired == self._jog_direction:
-            return  # 이미 올바른 상태(정지 포함) - 아무것도 안 함, 조그는 계속 이어짐
+            # 이미 같은 방향인데, StartJOG의 max_dis(단일 조그 최대
+            # 이동거리)에 도달하면 로봇이 자체적으로 멈춰버릴 수 있음 -
+            # 그때 여기서 그냥 아무것도 안 하면 소프트웨어는 "계속
+            # 움직이는 중"이라고 착각한 채 로봇은 멈춰있게 됨(손이 아주
+            # 많이 멀어질 때 "안 따라옴"으로 느껴지던 원인). 그래서
+            # 방향이 같아도 주기적으로 새로 StartJOG를 보내 새로고침함.
+            if desired is not None and (time.time() - self._jog_started_at) >= _JOG_REFRESH_SEC:
+                self._set_jog_direction(desired, is_refresh=True)
+            return
 
         self._set_jog_direction(desired)
 
-    def _set_jog_direction(self, desired):
+    def _set_jog_direction(self, desired, is_refresh=False):
         try:
-            if self._jog_direction is not None:
+            if self._jog_direction is not None and not is_refresh:
                 error = self._manager.jog_stop(ref=5)  # 5 = 공구좌표계 점동 정지
                 if error != 0:
                     print(f"[손 트래킹] StopJOG 반환값(에러): {error}")
             if desired is not None:
                 direction = 1 if desired == "fwd" else 0
                 error = self._manager.jog_start(ref=4, nb=3, direction=direction, max_dis=500.0, vel=self.jog_vel)
+                self._jog_started_at = time.time()
                 with self._lock:
                     self._last_move_result = {"error": error, "exception": None}
                 if error != 0:
@@ -417,19 +434,22 @@ class CameraTracker:
             desired = "left" if desired == "right" else "right"
 
         if desired == self._horizontal_jog_direction:
+            if desired is not None and (time.time() - self._horizontal_jog_started_at) >= _JOG_REFRESH_SEC:
+                self._set_horizontal_jog_direction(desired, is_refresh=True)
             return
 
         self._set_horizontal_jog_direction(desired)
 
-    def _set_horizontal_jog_direction(self, desired):
+    def _set_horizontal_jog_direction(self, desired, is_refresh=False):
         try:
-            if self._horizontal_jog_direction is not None:
+            if self._horizontal_jog_direction is not None and not is_refresh:
                 error = self._manager.jog_stop(ref=5)  # 5 = 공구좌표계 점동 정지
                 if error != 0:
                     print(f"[손 트래킹] StopJOG(수평) 반환값(에러): {error}")
             if desired is not None:
                 direction = 1 if desired == "right" else 0
                 error = self._manager.jog_start(ref=4, nb=1, direction=direction, max_dis=500.0, vel=self.jog_vel)
+                self._horizontal_jog_started_at = time.time()
                 if error != 0:
                     print(f"[손 트래킹] StartJOG(수평) 반환값(에러): {error} "
                           f"(0이 아니면 실패 - 로봇 활성화 여부/안전정지 상태를 확인하세요)")
@@ -458,19 +478,22 @@ class CameraTracker:
             desired = "up" if desired == "down" else "down"
 
         if desired == self._vertical_jog_direction:
+            if desired is not None and (time.time() - self._vertical_jog_started_at) >= _JOG_REFRESH_SEC:
+                self._set_vertical_jog_direction(desired, is_refresh=True)
             return
 
         self._set_vertical_jog_direction(desired)
 
-    def _set_vertical_jog_direction(self, desired):
+    def _set_vertical_jog_direction(self, desired, is_refresh=False):
         try:
-            if self._vertical_jog_direction is not None:
+            if self._vertical_jog_direction is not None and not is_refresh:
                 error = self._manager.jog_stop(ref=5)  # 5 = 공구좌표계 점동 정지
                 if error != 0:
                     print(f"[손 트래킹] StopJOG(수직) 반환값(에러): {error}")
             if desired is not None:
                 direction = 1 if desired == "down" else 0
                 error = self._manager.jog_start(ref=4, nb=2, direction=direction, max_dis=500.0, vel=self.jog_vel)
+                self._vertical_jog_started_at = time.time()
                 if error != 0:
                     print(f"[손 트래킹] StartJOG(수직) 반환값(에러): {error} "
                           f"(0이 아니면 실패 - 로봇 활성화 여부/안전정지 상태를 확인하세요)")
