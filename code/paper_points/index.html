@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>종이 모서리 4곳 저장</title>
+<style>
+  :root { --bg:#f6f4ef; --card:#fff; --ink:#26242c; --muted:#6c6877; --line:#e3ddd0; --accent:#2f6fed; --danger:#c0392b; --ok:#1a8a4a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1b1a20; --card:#25242b; --ink:#f0eee8; --muted:#a6a2b0; --line:#3a3844; --accent:#6c9bff; --danger:#ff7b6b; --ok:#4cd08a; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } p.sub { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  input[type=text] { flex:1; min-width:140px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
+  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:transparent; color:inherit; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700; }
+  button.danger { color: var(--danger); } button:disabled { opacity:.5; cursor:not-allowed; }
+  .badge { font-size:12px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  .badge.on { color: var(--ok); border-color: var(--ok); }
+  .pose { font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--muted); word-break: break-all; }
+  .pt { display:grid; grid-template-columns: 1fr auto; gap:6px 12px; align-items:center; }
+  .pt h2 { margin:0; font-size:16px; } .pt .meta { grid-column: 1 / -1; }
+  .saved { color: var(--ok); font-weight: 700; }
+  .msg { min-height: 22px; font-size: 14px; } .msg.error { color: var(--danger); font-weight: 600; }
+  .note { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>종이 모서리 4곳 저장</h1>
+  <p class="sub">로봇을 직접 종이의 모서리로 옮긴 뒤 "현재 위치 저장"을 누르세요. 모서리 저장은 로봇을 움직이지 않고 <b>읽기만</b> 해요. (움직이는 건 아래 "펜 들기 테스트"뿐이에요)</p>
+
+  <div class="card">
+    <div class="row">
+      <input id="ip" type="text" value="192.168.58.2" aria-label="로봇 IP">
+      <button id="connectBtn" class="primary">연결</button>
+      <span id="badge" class="badge">연결 안 됨</span>
+    </div>
+    <p class="note" id="note">다른 로봇 패널(webcontrol, 포트 5000)과 동시에 같은 로봇에 연결하지 마세요.</p>
+    <div class="pose" id="tcp">현재 위치: -</div>
+  </div>
+
+  <div class="card note">시계 방향으로 저장하는 걸 추천해요: <b>1 왼쪽 위 → 2 오른쪽 위 → 3 오른쪽 아래 → 4 왼쪽 아래</b></div>
+
+  <div id="points"></div>
+
+  <div class="card" id="penCard">
+    <h2 style="margin:0 0 6px;font-size:16px">펜 끝 · 기울기 보정</h2>
+    <p class="note">모서리를 저장할 때 펜이 조금씩 다르게 기울어져도 되도록, 저장한 TCP 에서 <b>펜 끝까지 길이</b>를 알려 주면 <b>펜 끝 위치</b>로 환산해서 종이 평면(판이 기울어진 것 포함)을 만들어요.
+      도구 TCP 가 이미 펜 끝에 설정되어 있으면 아래 체크만 하고 길이는 0으로 두세요. 모르면 "도구 TCP 확인"을 눌러 보세요(읽기만 해요). 펜 끝 위치를 알면 "펜을 종이에 수직으로 세우기"도 쓸 수 있어요.</p>
+    <div class="row">
+      <label><input id="penTip" type="checkbox"> 도구 TCP 가 이미 펜 끝</label>
+      <label>펜 끝까지 길이 z(mm) <input id="penMm" type="number" min="0" max="500" step="0.1" value="0" style="width:80px"></label>
+      <label>옆으로 x <input id="penX" type="number" min="-200" max="200" step="0.1" value="0" style="width:70px"></label>
+      <label>y <input id="penY" type="number" min="-200" max="200" step="0.1" value="0" style="width:70px"></label>
+      <label><input id="penAlign" type="checkbox"> 펜을 종이에 수직으로 세우기</label>
+    </div>
+    <div class="row" style="margin-top:8px"><button id="penCheck">도구 TCP 확인</button><button id="penSave" class="primary">저장하고 평면 확인</button></div>
+    <div class="pose" id="penInfo" style="margin-top:10px;white-space:pre-line"></div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #ddd3">
+      <b>펜 끝은 그 자리에 두고 손목만 돌리기</b>
+      <p class="note">위에서 펜 끝 오프셋을 정해 두었으면, 펜 끝이 닿아 있는 점은 그대로 두고 펜(손목)만 기울이거나 판에 수직으로 세울 수 있어요. 속도 15% 이하, 한 번에 60° 이하로 2°씩 이어서 돌아요. 먼저 "미리 계산"을 눌러 보세요(로봇은 읽기만 해요).</p>
+      <div class="row">
+        <label><input type="radio" name="penAct" value="perpendicular" checked> 판에 수직으로 세우기</label>
+        <label><input type="radio" name="penAct" value="tilt"> 기울이기</label>
+        <label>방향 <select id="penDir"><option value="+u">모서리 1→2 쪽으로</option><option value="-u">모서리 2→1 쪽으로</option><option value="+v">모서리 1→4 쪽으로</option><option value="-v">모서리 4→1 쪽으로</option></select></label>
+        <label>각도(°) <input id="penDeg" type="number" min="0.5" max="60" step="0.5" value="10" style="width:70px"></label>
+        <label>속도(%) <input id="penVel" type="number" min="1" max="15" step="1" value="5" style="width:60px"></label>
+      </div>
+      <label class="note" style="display:flex;gap:8px;margin:8px 0;align-items:flex-start"><input id="penOk" type="checkbox" style="margin-top:3px"><span>손목·펜이 도는 공간이 비어 있고 정지 버튼 옆에 손이 있어요.</span></label>
+      <div class="row"><button id="penAngle">지금 펜 기울기 확인</button><button id="penPlan">미리 계산</button><button id="penRun" class="primary">돌리기 시작</button></div>
+      <button id="penStop" style="width:100%;margin-top:10px;padding:12px;font-size:16px;font-weight:800;background:#d93636;color:#fff;border:0;border-radius:10px">■ 정지 (Esc)</button>
+      <div class="pose" id="penMove" style="margin-top:10px;white-space:pre-line"></div>
+    </div>
+  </div>
+
+  <div class="card" id="tcpCard">
+    <h2 style="margin:0 0 6px;font-size:16px">펜 끝 자동 교정 (한 점에 대고 자세 바꿔 저장)</h2>
+    <p class="note">종이(또는 판) 위 <b>한 점</b>에 <b>펜 끝을 대고</b>, 그 점을 벗어나지 않게 손목만 <b>앞·뒤·좌·우로 다르게 기울여서</b> 그때마다 "이 자세 저장"을 누르세요(4번 이상, 서로 20° 이상 다르게). 그러면 펜 끝까지 길이(z)와 옆으로 나온 정도(x, y)를 계산해요.
+      <b>모서리를 저장할 때와 같은 도구(TCP) 설정</b>에서 해야 해요. 이 단계는 로봇에 읽기 명령만 보내요(움직이지 않아요).</p>
+    <div class="row"><button id="tcpSave" class="primary">이 자세 저장</button><button id="tcpSolve">계산하기</button><button id="tcpApply">계산 결과를 펜 끝 설정에 적용</button><button id="tcpClear" class="danger">모두 지우기</button></div>
+    <div class="pose" id="tcpList" style="margin-top:10px;white-space:pre-line">저장한 자세 없음</div>
+    <div class="pose" id="tcpInfo" style="margin-top:10px;white-space:pre-line"></div>
+  </div>
+
+  <div class="card" id="liftCard">
+    <h2 style="margin:0 0 6px;font-size:16px">펜 들기 테스트 (뒤로 갔다가 앞으로)</h2>
+    <p class="note">다른 선으로 옮길 때처럼, <b>도구 Z축(J6 방향)으로 조금 뒤로(−) 갔다가 다시 앞으로(+)</b> 와요. 펜이 도구 +Z 방향으로 종이를 향해 있다고 가정해요.
+      처음엔 <b>종이에서 멀리 떨어진 허공</b>에서 "뒤로만"을 눌러, 펜이 <b>종이에서 멀어지는 방향이 맞는지</b> 먼저 확인하세요.</p>
+    <div class="row">
+      <label>거리(mm) <input id="liftMm" type="number" min="1" max="30" step="1" value="10" style="width:80px"></label>
+      <label>속도(%) <input id="liftVel" type="number" min="1" max="15" step="1" value="10" style="width:80px"></label>
+    </div>
+    <label class="note" style="display:flex;gap:8px;margin:10px 0;align-items:flex-start"><input id="liftOk" type="checkbox" style="margin-top:3px">
+      <span>펜 끝 주변과 뒤쪽이 비어 있고, 정지 버튼 옆에 손이 있어요. 로봇은 이미 활성화되어 있어요.</span></label>
+    <div class="row">
+      <button id="liftRound" class="primary">뒤로 갔다가 앞으로</button>
+      <button id="liftBack">뒤로만</button>
+      <button id="liftFwd">앞으로만</button>
+    </div>
+    <button id="liftStop" style="width:100%;margin-top:10px;padding:14px;font-size:18px;font-weight:800;background:#d93636;color:#fff;border:0;border-radius:10px">■ 정지 (Esc)</button>
+    <div class="pose" id="liftInfo" style="margin-top:10px;white-space:pre-line"></div>
+  </div>
+
+  <div class="card" id="loopCard">
+    <h2 style="margin:0 0 6px;font-size:16px">사각 구역 한 바퀴</h2>
+    <p class="note">저장한 <b>모서리 1 → 2 → 3 → 4 → 1</b> 순서로 직선 이동해요. 시작은 <b>모서리 1 위쪽</b>으로 접근하니, 펜을 모서리 1 근처(25cm 이내)에 두고 시작하세요. 먼저 "경로 보기"로 이동할 좌표를 확인하세요.</p>
+    <div class="row">
+      <label><input type="radio" name="loopMode" value="air" checked> <b>공중 한 바퀴</b> (펜이 종이에 닿지 않음)</label>
+      <label><input type="radio" name="loopMode" value="draw"> <b>종이에 닿게</b> (테두리를 그려요)</label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>공중 높이(mm) <input id="loopAir" type="number" min="10" max="100" step="5" value="30" style="width:80px"></label>
+      <label>속도(%) <input id="loopVel" type="number" min="1" max="15" step="1" value="10" style="width:80px"></label>
+    </div>
+    <label class="note" style="display:flex;gap:8px;margin:10px 0;align-items:flex-start"><input id="loopOk" type="checkbox" style="margin-top:3px">
+      <span>로봇 이동 경로 주변이 비어 있고, 정지 버튼 옆에 손이 있어요. 로봇은 이미 활성화되어 있어요.</span></label>
+    <label class="note" id="loopDrawRow" style="display:none;gap:8px;margin:0 0 10px;align-items:flex-start"><input id="loopDrawOk" type="checkbox" style="margin-top:3px">
+      <span><b>펜이 종이에 닿아도 안전해요.</b> (공중 한 바퀴를 먼저 해 봤어요)</span></label>
+    <div class="row"><button id="loopPlan">경로 보기</button><button id="loopRun" class="primary">한 바퀴 시작</button></div>
+    <button id="loopStop" style="width:100%;margin-top:10px;padding:14px;font-size:18px;font-weight:800;background:#d93636;color:#fff;border:0;border-radius:10px">■ 정지 (Esc)</button>
+    <div class="pose" id="loopInfo" style="margin-top:10px;white-space:pre-line"></div>
+  </div>
+
+  <div class="card" id="cylCard">
+    <h2 style="margin:0 0 6px;font-size:16px">원통 그리기 (공중)</h2>
+    <p class="note">저장한 사각 구역 <b>가운데</b>에서, 종이에서 펜 쪽으로 <b>떠 있는 공중</b>에 <b>아래 원 → 위 원 → 세로선 4개</b>를 <b>끊김 없이 한 번에</b> 그려요. 펜이 종이에 닿지 않아요.
+      "종이에서 펜 쪽"은 저장한 펜 방향의 반대쪽이에요(바닥 종이면 위, 세운 판이면 로봇 쪽). 이 로봇은 명령 큐를 볼 수 없어서(CNDE 안 붙음), <b>로봇의 실제 위치를 계속 읽으며</b> 지나간 점보다 8개까지만 앞서 보내 끊김 없이 이어요. 먼저 "위치 읽기 확인"을 눌러 보세요.</p>
+    <div class="row">
+      <label>반지름(mm) <input id="cylR" type="number" min="10" max="65" step="5" value="40" style="width:75px"></label>
+      <label>아래 높이(mm) <input id="cylZ0" type="number" min="10" max="140" step="5" value="20" style="width:75px"></label>
+      <label>원통 높이(mm) <input id="cylH" type="number" min="10" max="140" step="5" value="50" style="width:75px"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>원 분할 <select id="cylSeg"><option>24</option><option selected>36</option><option>48</option><option>72</option></select></label>
+      <label>속도(%) <input id="cylVel" type="number" min="1" max="15" step="1" value="10" style="width:75px"></label>
+    </div>
+    <label class="note" style="display:flex;gap:8px;margin:10px 0;align-items:flex-start"><input id="cylOk" type="checkbox" style="margin-top:3px">
+      <span>원통 경로(구역 앞 공간) 주변이 비어 있고, 정지 버튼 옆에 손이 있어요. 로봇은 이미 활성화되어 있어요.</span></label>
+    <div class="row"><button id="cylCheck">위치 읽기 확인</button><button id="cylPlan">경로 보기</button><button id="cylRun" class="primary">원통 그리기 시작</button></div>
+    <button id="cylStop" style="width:100%;margin-top:10px;padding:14px;font-size:18px;font-weight:800;background:#d93636;color:#fff;border:0;border-radius:10px">■ 정지 (Esc)</button>
+    <div class="pose" id="cylInfo" style="margin-top:10px;white-space:pre-line"></div>
+  </div>
+
+  <div class="card" id="drawCard">
+    <h2 style="margin:0 0 6px;font-size:16px">SVG 그림 그리기</h2>
+    <p class="note">MindDraw가 그린 그림(PNG)은 선 굵기를 깎은 <b>중심선</b>으로 바꿔 SVG 획으로 만든 뒤 그려요(윤곽을 따라가면 한 선을 두 번 그려서요). 사진·PNG·JPG를 올려도 같아요. SVG 파일(또는 예시)을 저장한 사각 구역 <b>안에 비율을 지켜 맞추고</b>, 획마다 <b>펜 들기 → 이동 → 내리기 → 그리기</b>를 반복해요. 전체를 <b>끊김 없이 이어서</b> 보내요(원통과 같은 방식).
+      <b>곡선(스플라인)</b>을 켜면 획마다 컨트롤러 스플라인(NewSpline)으로 점들을 부드러운 곡선으로 지나가요(이 로봇에서는 아직 시험 전이라, 처음엔 <b>처음 N획만</b>을 2~3으로 해서 공중 연습하세요). 모든 도형의 <b>윤곽선</b>을 따라 그려요(채우기는 그리지 않아요). 먼저 "경로 보기"로 방향을 확인하세요: 어느 모서리가 위쪽인지는 저장 순서에 달려 있어서 <b>회전</b>으로 맞춰요. 처음에는 <b>공중 연습</b>으로 해 보세요.</p>
+    <div class="row" style="margin-top:10px;align-items:center" id="presetRow">
+      <label>저장한 세팅 <select id="presetSel"><option value="">(없음)</option></select></label>
+      <button id="presetLoad">불러오기</button><button id="presetDel" class="danger">삭제</button>
+      <input id="presetName" type="text" placeholder="세팅 이름(예: 보드마카 2mm)" maxlength="40" style="width:200px"><button id="presetSave" class="primary">현재 값 저장</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <select id="artSel"><option value="">MindDraw 그림 고르기…</option></select>
+      <button id="artReload" title="목록 새로고침">↻</button>
+      <label><input id="vecFill" type="checkbox" checked> 내부 채우기(원본과 같게)</label>
+      <label style="display:inline-flex;align-items:center;gap:6px">디테일 <input id="vecLevel" type="range" min="0" max="100" step="5" value="100" style="width:160px"><b id="vecLevelTxt" style="min-width:3.2em">100%</b></label>
+      <label>펜 끝 굵기(mm) <input id="vecPen" type="number" min="0.2" max="10" step="0.1" value="2" style="width:70px"></label>
+      <input id="svgFile" type="file" accept=".svg,image/svg+xml,image/png,image/jpeg">
+      <button id="svgSample">예시 그림(집·해·별)</button>
+      <span class="note" id="svgName">선택된 그림 없음</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label><input type="radio" name="drawMode" value="air" checked> 공중 연습(종이에 안 닿음)</label>
+      <label><input type="radio" name="drawMode" value="draw"> 종이에 그리기</label>
+      <label>공중 높이(mm) <input id="drawAir" type="number" min="10" max="100" step="5" value="30" style="width:75px"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>회전 <select id="drawRot"><option>0</option><option>90</option><option>180</option><option>270</option></select>°</label>
+      <label><input id="drawMirror" type="checkbox"> 좌우 반전</label>
+      <label>크기(%) <input id="drawScale" type="number" min="10" max="100" step="5" value="100" style="width:75px"></label>
+      <label>여백(mm) <input id="drawMargin" type="number" min="5" max="100" step="5" value="10" style="width:75px"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>펜 드는 높이(mm) <input id="drawLift" type="number" min="3" max="30" step="1" value="8" style="width:75px"></label>
+      <label>속도(%) <input id="drawVel" type="number" min="1" max="100" step="1" value="10" style="width:75px"></label>
+      <label><input id="drawCurve" type="checkbox"> <b>곡선(스플라인)</b> <span class="note">(켜면 획·끝점마다 멈췄다 가요. 끊김 없이 이으려면 끄세요)</span></label>
+      <label>곡선 조절점 간격(mm) <input id="drawStep" type="number" min="2" max="15" step="0.5" value="5" style="width:70px"></label>
+      <label>곡선 속도(%, 비우면 위 속도와 같게) <input id="drawSVel" type="number" min="1" max="100" step="1" value="" style="width:70px"></label>
+      <label>곡선 시간(ms) <input id="drawAvg" type="number" min="50" max="10000" step="50" value="2000" style="width:80px"></label>
+      <label>처음 N획만(0=전부) <input id="drawFirst" type="number" min="0" max="500" step="1" value="0" style="width:70px"></label>
+      <label>직선 이음 점 간격(mm) <input id="drawSeg" type="number" min="0.3" max="10" step="0.1" value="1.5" style="width:75px"></label>
+      <label>짧은 선 버리기(mm) <input id="drawMinStroke" type="number" min="0" max="30" step="0.5" value="0.6" style="width:75px"></label>
+    </div>
+    <label class="note" style="display:block;margin-top:10px"><input id="prevThick" type="checkbox" checked> 미리보기에 펜 굵기 반영(실제로 그려질 모습) <span>— 끄면 중심선만 보여요</span></label>
+    <div id="prevBox" style="display:none;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:flex-start">
+      <div style="flex:1 1 220px;min-width:0"><div class="note" style="margin-bottom:4px">원본 그림</div>
+        <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:6px;text-align:center;overflow:hidden"><img id="origImg" alt="원본 그림" style="max-width:100%;max-height:340px;object-fit:contain"></div></div>
+      <div style="flex:2 1 320px;min-width:0"><div class="note" style="margin-bottom:4px">로봇이 그릴 모습(종이 구역 안)</div>
+        <svg id="drawPrev" viewBox="0 0 10 10" style="width:100%;max-height:340px;background:#fafafa;border:1px solid #ddd;border-radius:8px"></svg></div>
+    </div>
+    <label class="note" style="display:flex;gap:8px;margin:10px 0 4px;align-items:flex-start"><input id="drawOk" type="checkbox" style="margin-top:3px">
+      <span>로봇 이동 경로 주변이 비어 있고, 정지 버튼 옆에 손이 있어요. 로봇은 이미 활성화되어 있어요.</span></label>
+    <label class="note" id="drawDrawRow" style="display:none;gap:8px;margin:4px 0 10px;align-items:flex-start"><input id="drawDrawOk" type="checkbox" style="margin-top:3px">
+      <span>펜이 종이에 닿아도 안전해요(펜 끝·종이 높이를 확인했어요).</span></label>
+    <div class="row"><button id="drawPlan">경로 보기</button><button id="drawRun" class="primary">그리기 시작</button></div>
+    <button id="drawStop" style="width:100%;margin-top:10px;padding:14px;font-size:18px;font-weight:800;background:#d93636;color:#fff;border:0;border-radius:10px">■ 정지 (Esc)</button>
+    <div class="pose" id="drawInfo" style="margin-top:10px;white-space:pre-line"></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><button id="clearAll" class="danger">4곳 모두 지우기</button></div>
+    <div class="msg" id="msg" role="status"></div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const NAMES = ["모서리 1 (왼쪽 위)", "모서리 2 (오른쪽 위)", "모서리 3 (오른쪽 아래)", "모서리 4 (왼쪽 아래)"];
+let connected = false;
+
+async function api(path, body) {
+  const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `서버 오류 (${res.status})`);
+  return data;
+}
+const say = (m, err) => { $("msg").textContent = m; $("msg").className = "msg" + (err ? " error" : ""); };
+const fmt = (p) => `x ${p[0].toFixed(2)}  y ${p[1].toFixed(2)}  z ${p[2].toFixed(2)}  rx ${p[3].toFixed(2)}  ry ${p[4].toFixed(2)}  rz ${p[5].toFixed(2)}`;
+
+function build() {
+  const box = $("points"); box.replaceChildren();
+  NAMES.forEach((name, i) => {
+    const c = document.createElement("div"); c.className = "card pt";
+    const h = document.createElement("h2"); h.id = "h" + i; h.textContent = name;
+    const ctl = document.createElement("div"); ctl.className = "row";
+    const save = Object.assign(document.createElement("button"), { textContent: "현재 위치 저장", className: "primary", id: "save" + i });
+    const clr = Object.assign(document.createElement("button"), { textContent: "지우기", className: "danger" });
+    save.onclick = async () => { try { const r = await api("/api/save", { index: i + 1 }); say(`${name} 저장: ${fmt(r.pose)}`); } catch (e) { say(e.message, true); } poll(); };
+    clr.onclick = async () => { await api("/api/clear", { index: i + 1 }); say(`${name} 지웠어요.`); poll(); };
+    ctl.append(save, clr);
+    const meta = document.createElement("div"); meta.className = "meta pose"; meta.id = "m" + i; meta.textContent = "아직 저장 안 됨";
+    c.append(h, ctl, meta); box.append(c);
+  });
+}
+
+async function poll() {
+  try {
+    const s = await api("/api/state");
+    connected = s.connected;
+    $("badge").textContent = s.connected ? `연결됨 ${s.ip}` : "연결 안 됨"; $("badge").className = "badge" + (s.connected ? " on" : "");
+    if (!s.available) $("note").textContent = s.reason;
+    $("tcp").textContent = s.tcp ? "현재 위치: " + fmt(s.tcp) + (s.error_code && s.error_code.some((c) => c) ? `  (에러코드 ${JSON.stringify(s.error_code)})` : "") : "현재 위치: -";
+    const pn = s.pen || {};
+    if (pn.state === "running") $("penMove").textContent = `돌리는 중… ${pn.sent}/${pn.total}`; else if (pn.state === "done" && $("penMove").textContent.startsWith("돌리는")) $("penMove").textContent = "끝났어요. 펜 끝은 그 자리에 있어요."; else if ((pn.state === "error" || pn.state === "stopped") && $("penMove").textContent.startsWith("돌리는")) $("penMove").textContent = pn.state === "stopped" ? "정지했어요." : "오류: " + pn.error;
+    const m = s.motion || {}, busy = m.state === "running";
+    const cy = s.cyl || {}, dr = s.draw || {}, drawBusy = dr.state === "running", cylBusy = cy.state === "running" || drawBusy;
+    $("cylRun").disabled = !s.connected || busy || cylBusy;
+    $("drawRun").disabled = !s.connected || busy || cylBusy || (s.loop || {}).state === "running";
+    if (drawBusy || ["done", "stopped", "error"].includes(dr.state)) {
+      const head = drawBusy ? `진행: 보낸 점 ${dr.sent}/${dr.total} · 로봇이 지나간 점 ${dr.reached}/${dr.total} · ${dr.step}` : dr.state === "done" ? "그림을 다 그렸어요." : dr.state === "stopped" ? "정지했어요. (그 자리에 있어요)" : "오류: " + dr.error;
+      $("drawInfo").textContent = head + `\n앞서 보낸 점 최대 ${dr.ahead_max}개 · 보내는 속도가 못 따라가 끊겼을 수 있는 횟수 ${dr.starved}` + (dr.fallback ? `\n곡선이 안 되어 직선으로 대체한 횟수 ${dr.fallback}` : "") + (s.stale ? "\n(이동 중이라 위치 표시는 직전 값이에요)" : "");
+    }
+    if (cy.state === "running" || ["done", "stopped", "error"].includes(cy.state)) {
+      const head = cy.state === "running" ? `진행: 보낸 점 ${cy.sent}/${cy.total} · 로봇이 지나간 점 ${cy.reached}/${cy.total} · ${cy.step}` : cy.state === "done" ? "원통을 다 그렸어요." : cy.state === "stopped" ? "정지했어요. (그 자리에 있어요)" : "오류: " + cy.error;
+      $("cylInfo").textContent = head + `\n앞서 보낸 점 최대 ${cy.ahead_max}개 · 보내는 속도가 못 따라가 끊겼을 수 있는 횟수 ${cy.starved}` + (s.stale ? "\n(이동 중이라 위치 표시는 직전 값이에요)" : "");
+    }
+    const lp = s.loop || {}, loopBusy = lp.state === "running";
+    ["liftRound", "liftBack", "liftFwd"].forEach((id) => { $(id).disabled = !s.connected || busy || loopBusy || cylBusy; });
+    $("loopRun").disabled = !s.connected || busy || loopBusy || cylBusy;
+    if (loopBusy || ["done", "stopped", "error"].includes(lp.state)) {
+      const head = loopBusy ? `진행 ${lp.index + 1}/${lp.total}: ${lp.step}` : lp.state === "done" ? "한 바퀴 끝났어요." : lp.state === "stopped" ? "정지했어요. (그 자리에 있어요)" : "오류: " + lp.error;
+      const keep = ($("loopInfo").textContent.split("\n").filter((l) => /^\d+\. /.test(l))).join("\n");
+      $("loopInfo").textContent = head + (keep ? "\n" + keep : "");
+    }
+    const lines = [];
+    if (busy) lines.push("진행: " + (STEP[m.step] || "준비 중"));
+    else if (m.state === "done") lines.push("끝났어요.");
+    else if (m.state === "stopped") lines.push("정지했어요. (뒤로 간 상태면 그 자리에 있어요)");
+    else if (m.state === "error") lines.push("오류: " + m.error);
+    if (m.moved_mm != null) lines.push(`뒤로 이동한 거리(측정): ${m.moved_mm}mm`);
+    if (m.residual_mm != null) lines.push(`처음 위치와의 차이(돌아온 뒤): ${m.residual_mm}mm`);
+    if (m.poses && m.poses.start) lines.push("처음 " + fmt(m.poses.start));
+    if (m.poses && m.poses.retract) lines.push("뒤 " + fmt(m.poses.retract));
+    if (m.poses && m.poses.advance) lines.push("다시 앞 " + fmt(m.poses.advance));
+    $("liftInfo").textContent = lines.join("\n");
+    s.points.forEach((p, i) => {
+      $("save" + i).disabled = !s.connected;
+      $("h" + i).innerHTML = "";
+      $("h" + i).append(NAMES[i], p ? Object.assign(document.createElement("span"), { className: "saved", textContent: "  ✓ 저장됨" }) : "");
+      const d = s.distances[i];
+      $("m" + i).textContent = p ? `${fmt(p.pose)}\n저장 ${p.time}` + (d != null ? ` · 다음 모서리까지 ${d}mm` : "") : "아직 저장 안 됨";
+      $("m" + i).style.whiteSpace = "pre-line";
+    });
+  } catch { /* 다음 주기에 다시 */ }
+}
+
+const loopMode = () => document.querySelector('input[name=loopMode]:checked').value;
+document.querySelectorAll('input[name=loopMode]').forEach((r) => r.addEventListener("change", () => { $("loopDrawRow").style.display = loopMode() === "draw" ? "flex" : "none"; $("loopRun").textContent = loopMode() === "draw" ? "테두리 그리기 시작" : "한 바퀴 시작"; }));
+$("loopPlan").onclick = async () => {
+  try {
+    const r = await api("/api/loop/plan", { mode: loopMode(), air_mm: Number($("loopAir").value) });
+    const L = [`변 길이(mm): ${r.sides_mm.join(", ")} · 각도: ${r.angles_deg.join("°, ")}° · 평면 벗어남 ${r.flatness_mm}mm`];
+    r.waypoints.forEach((w, i) => L.push(`${i + 1}. ${w.name}: x ${w.pose[0].toFixed(1)}  y ${w.pose[1].toFixed(1)}  z ${w.pose[2].toFixed(1)}`));
+    if (r.warnings.length) L.push("⚠ " + r.warnings.join(" "));
+    $("loopInfo").textContent = L.join("\n"); say("경로를 계산했어요. 로봇은 움직이지 않았어요.");
+  } catch (e) { $("loopInfo").textContent = ""; say(e.message, true); }
+};
+$("loopRun").onclick = async () => {
+  try {
+    await api("/api/loop/run", { mode: loopMode(), air_mm: Number($("loopAir").value), vel: Number($("loopVel").value), confirm: $("loopOk").checked, confirm_draw: $("loopDrawOk").checked });
+    say("시작했어요. 이상하면 정지(Esc)를 누르세요.");
+  } catch (e) { say(e.message, true); }
+  poll();
+};
+$("loopStop").onclick = async () => { try { await api("/api/stop", {}); say("정지했어요."); } catch (e) { say(e.message, true); } poll(); };
+
+const cylBody = () => ({ r: Number($("cylR").value), z0: Number($("cylZ0").value), height: Number($("cylH").value),
+  segments: Number($("cylSeg").value), vel: Number($("cylVel").value), confirm: $("cylOk").checked });
+$("cylCheck").onclick = async () => {
+  try { const r = await api("/api/cyl/check", {});
+    $("cylInfo").textContent = `위치 읽기 정상 · 한 번 읽는 데 약 ${r.read_ms}ms · ${fmt(r.tcp)}`;
+    say("위치를 읽을 수 있어요."); } catch (e) { $("cylInfo").textContent = ""; say(e.message, true); }
+};
+$("cylPlan").onclick = async () => {
+  try { const r = await api("/api/cyl/plan", cylBody()), i = r.info;
+    $("cylInfo").textContent = [`반지름 ${i.radius_mm}mm(구역 안 최대 ${i.max_radius_mm}) · 종이에서 ${i.z0_mm}~${i.z1_mm}mm · 점 ${i.points}개 · 총 길이 ${i.path_mm}mm`,
+      `가장 짧은 구간 ${i.shortest_segment_mm}mm · 이음 반경(blendR) ${r.blend_mm}mm`, `시작점: x ${r.start[0].toFixed(1)}  y ${r.start[1].toFixed(1)}  z ${r.start[2].toFixed(1)}`,
+      "순서: " + r.parts.map((p) => p.name).join(" → ")].join("\n");
+    say("경로를 계산했어요. 로봇은 움직이지 않았어요."); } catch (e) { $("cylInfo").textContent = ""; say(e.message, true); }
+};
+$("cylRun").onclick = async () => { try { await api("/api/cyl/run", cylBody()); say("시작했어요. 이상하면 정지(Esc)를 누르세요."); } catch (e) { say(e.message, true); } poll(); };
+$("cylStop").onclick = async () => { try { await api("/api/stop", {}); say("정지했어요."); } catch (e) { say(e.message, true); } poll(); };
+
+// ---- SVG 그리기
+const SAMPLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160">
+<path d="M30 80 L100 25 L170 80 Z"/><rect x="45" y="80" width="110" height="65"/><rect x="88" y="105" width="25" height="40"/>
+<circle cx="165" cy="30" r="14"/><path d="M20 30 L24 40 L35 40 L26 47 L30 58 L20 51 L10 58 L14 47 L5 40 L16 40 Z"/></svg>`;
+let svgText = "";
+const drawMode = () => document.querySelector('input[name=drawMode]:checked').value;
+document.querySelectorAll('input[name=drawMode]').forEach((r) => r.addEventListener("change", () => { $("drawDrawRow").style.display = drawMode() === "draw" ? "flex" : "none"; }));
+let origSrc = "";
+const svgUrl = (t) => URL.createObjectURL(new Blob([t], { type: "image/svg+xml" }));
+const useSvg = (text, name) => { svgText = text; $("svgName").textContent = name; $("prevBox").style.display = "none"; };
+let vecPenMm = 0;
+let lastVec = null;
+async function vectorize(body, name) {
+  lastVec = { body, name };
+  say("그림을 선으로 바꾸는 중…");
+  try { const r = await api("/api/draw/vectorize", body); vecPenMm = body.pen_mm; useSvg(r.svg, `${name} → 획 ${r.strokes}개 · 펜 ${r.pen_mm}mm 기준`); say(`획 ${r.strokes}개로 바꿨어요. "경로 보기"를 눌러 확인하세요.` + (r.warning ? " ⚠ " + r.warning : ""), !!r.warning); }
+  catch (e) { say(e.message, true); }
+}
+async function loadArt() {
+  try { const r = await api("/api/draw/images"), sel = $("artSel"), cur = sel.value; sel.length = 1;
+    r.images.forEach((n) => sel.append(new Option(n, n))); sel.value = r.images.includes(cur) ? cur : ""; } catch { /* 무시 */ }
+}
+$("artReload").onclick = loadArt;
+const vecOpts = () => ({ fill: $("vecFill").checked, detail_level: Number($("vecLevel").value), pen_mm: Number($("vecPen").value), rotate: Number($("drawRot").value), mirror: $("drawMirror").checked,
+  scale_pct: Number($("drawScale").value), margin: Number($("drawMargin").value) });
+$("artSel").onchange = () => { const n = $("artSel").value; if (n) { origSrc = `/api/draw/image/${n}`; vectorize({ name: n, ...vecOpts() }, n); } };
+$("svgFile").onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  origSrc = URL.createObjectURL(f);
+  if (/svg/.test(f.type) || /\.svg$/i.test(f.name)) return useSvg(await f.text(), f.name);
+  const b64 = await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1]); fr.readAsDataURL(f); });
+  vectorize({ image_b64: b64, ...vecOpts() }, f.name);
+};
+$("svgSample").onclick = () => { origSrc = svgUrl(SAMPLE_SVG); useSvg(SAMPLE_SVG, "예시 그림"); };
+const drawBody = () => ({ svg: svgText, detail_level: Number($("vecLevel").value), pen_mm: Number($("vecPen").value), mode: drawMode(), air_mm: Number($("drawAir").value), rotate: Number($("drawRot").value), mirror: $("drawMirror").checked,
+  scale_pct: Number($("drawScale").value), margin: Number($("drawMargin").value), lift: Number($("drawLift").value), min_seg: Number($("drawSeg").value), curve: $("drawCurve").checked, curve_step: Number($("drawStep").value), avg_ms: Number($("drawAvg").value), spline_vel: Number($("drawSVel").value) || 0, first_n: Number($("drawFirst").value), min_stroke: Number($("drawMinStroke").value), vel: Number($("drawVel").value),
+  confirm: $("drawOk").checked, confirm_draw: $("drawDrawOk").checked });
+function preview(r) {
+  const NS = "http://www.w3.org/2000/svg", svg = $("drawPrev"); svg.replaceChildren();
+  const xs = r.paper.map((p) => p[0]), ys = r.paper.map((p) => p[1]), pad = 10;
+  const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, y0 = Math.min(...ys) - pad, y1 = Math.max(...ys) + pad;
+  svg.setAttribute("viewBox", `${x0} ${-y1} ${x1 - x0} ${y1 - y0}`);                // v 는 위쪽이 +, 화면은 아래쪽이 + 이라 부호를 뒤집는다
+  const el = (t, a) => { const n = document.createElementNS(NS, t); Object.entries(a).forEach(([k, v]) => n.setAttribute(k, v)); svg.append(n); return n; };
+  el("polygon", { points: r.paper.map((p) => `${p[0]},${-p[1]}`).join(" "), fill: "#fff", stroke: "#999", "stroke-width": 0.6 });
+  // 실제로 그려질 모습: 선 굵기를 펜 끝 굵기(mm)로 그린다(단위가 mm 라서 그대로 맞는다). 끄면 중심선만 가늘게 보인다.
+  const thick = $("prevThick").checked, penW = Math.max(0.3, Number($("vecPen").value) || 0.8);
+  r.strokes.forEach((s) => el("polyline", { points: s.map((p) => `${p[0]},${-p[1]}`).join(" "), fill: "none", stroke: thick ? "#111" : "#1a56db", "stroke-width": thick ? penW : 0.8,
+    "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  const f = (x1 - x0) / 40;
+  r.paper.forEach((p, i) => { const t = el("text", { x: p[0], y: -p[1], "font-size": f, fill: "#d93636", "text-anchor": "middle", "dominant-baseline": "middle", "font-weight": 700 }); t.textContent = i + 1; });
+  $("prevBox").style.display = "flex";
+  const o = $("origImg");
+  if (origSrc) { if (o.getAttribute("src") !== origSrc) o.src = origSrc;
+    o.style.transform = `rotate(${-Number($("drawRot").value)}deg) scaleX(${$("drawMirror").checked ? -1 : 1})`; }       // 계획과 같은 회전·반전으로 보여 준다
+  $("origImg").parentElement.parentElement.style.display = origSrc ? "" : "none";
+}
+$("prevThick").onchange = () => { if (lastPlan) preview(lastPlan); };
+// 디테일 슬라이더: 움직이면 잠깐 뒤 같은 그림을 그 수준으로 다시 변환하고 경로 미리보기를 갱신한다
+const showLevel = () => { $("vecLevelTxt").textContent = $("vecLevel").value + "%"; };
+let levelTimer = null;
+$("vecLevel").addEventListener("input", () => {
+  showLevel(); clearTimeout(levelTimer);
+  levelTimer = setTimeout(async () => { if (lastVec) { await vectorize({ ...lastVec.body, ...vecOpts() }, lastVec.name); if (svgText) $("drawPlan").click(); } }, 450);
+});
+showLevel();
+
+let lastPlan = null;
+$("drawPlan").onclick = async () => {
+  if (!svgText) return say("먼저 SVG 파일을 고르거나 예시 그림을 눌러 주세요.", true);
+  try { const r = await api("/api/draw/plan", drawBody()), i = r.info;
+    lastPlan = r; preview(r);
+    $("drawInfo").textContent = [`획 ${i.strokes}개 · ${i.curve ? "조절점" : "점"} ${i.points}개 · 그림 ${i.size_mm[0]}×${i.size_mm[1]}mm (배율 ${i.scale}) · 그리는 선 ${i.pen_mm}mm · 총 이동 ${i.path_mm}mm`,
+      `${i.pen_width_mm ? `변환 때 쓴 펜 굵기 ${i.pen_width_mm}mm${vecPenMm && Math.abs(i.pen_width_mm - vecPenMm) > 0.15 ? " (⚠ 종이·크기·회전이 바뀌었으니 그림을 다시 골라 변환하세요)" : ""} · ` : ""}그리는 높이 ${i.pen_height_mm}mm · 펜 든 높이 ${i.lift_height_mm}mm (종이 기준)`, `시작점: x ${r.start[0].toFixed(1)}  y ${r.start[1].toFixed(1)}  z ${r.start[2].toFixed(1)}`,
+      ...(r.warnings.length ? ["⚠ " + r.warnings.join(" ")] : [])].join("\n");
+    say("경로를 계산했어요. 로봇은 움직이지 않았어요. 빨간 숫자는 저장한 모서리 번호예요."); } catch (e) { $("drawInfo").textContent = ""; say(e.message, true); }
+};
+$("drawRun").onclick = async () => {
+  if (!svgText) return say("먼저 SVG 파일을 고르거나 예시 그림을 눌러 주세요.", true);
+  try { await api("/api/draw/run", drawBody()); say("시작했어요. 이상하면 정지(Esc)를 누르세요."); } catch (e) { say(e.message, true); } poll();
+};
+$("drawStop").onclick = async () => { try { await api("/api/stop", {}); say("정지했어요."); } catch (e) { say(e.message, true); } poll(); };
+
+// ---- 펜 끝 · 기울기 보정
+async function loadPen() {
+  try { const s = await api("/api/settings"); $("penTip").checked = s.tip_tcp; $("penMm").value = s.pen_mm; $("penX").value = s.pen_x; $("penY").value = s.pen_y; $("penAlign").checked = s.align; } catch { /* 무시 */ }
+}
+function showPlane(r) {
+  const L = [`판 기울기: 수평(책상)에서 ${(90 - Math.abs(r.elevation_deg)).toFixed(1)}° · 수직(세운 판)에서 ${Math.abs(r.elevation_deg).toFixed(1)}° · 변 길이 ${r.sides_mm.join(", ")}mm · 평면 벗어남 ${r.flatness_mm}mm`,
+    `저장한 펜 축과 판 법선 차이 ${r.pen_normal_deg}° · 모서리별 펜 기울기 차이 최대 ${r.ori_spread_deg}°`,
+    r.pen_off.some((v) => v) ? `펜 끝 오프셋 x ${r.pen_off[0]} · y ${r.pen_off[1]} · z ${r.pen_off[2]}mm 로 환산함` : r.tip_tcp ? "도구 TCP = 펜 끝으로 봄" : "펜 끝 위치를 모름(보정 없음)"];
+  if (r.align) L.push(`그리는 동안 펜을 판에 수직으로 세움(저장한 자세에서 ${r.align_deg}° 보정)`);
+  if (r.warnings.length) L.push("⚠ " + r.warnings.join(" "));
+  $("penInfo").textContent = L.join("\n");
+}
+$("penCheck").onclick = async () => {
+  try { const r = await api("/api/tool/check", {});
+    $("penInfo").textContent = r.is_flange ? "지금 도구 TCP 오프셋이 0 이에요 → TCP 가 플랜지 중심이고 펜 끝이 아니에요. 플랜지에서 펜 끝까지 길이(mm)를 재서 입력하세요."
+      : `도구 TCP 오프셋 ${r.offset.map((v) => v.toFixed(1)).join(", ")} (길이 ${r.length_mm}mm) → TCP 가 펜 끝에 설정되어 있을 가능성이 높아요. 맞으면 '도구 TCP 가 이미 펜 끝'을 체크하고 길이는 0 으로 두세요.`;
+  } catch (e) { say(e.message, true); }
+};
+$("penSave").onclick = async () => {
+  try { await api("/api/settings", { pen_mm: Number($("penMm").value), pen_x: Number($("penX").value), pen_y: Number($("penY").value), tip_tcp: $("penTip").checked, align: $("penAlign").checked });
+    showPlane(await api("/api/plane")); say("저장했어요. 이 설정이 사각 구역·원통·그림 경로에 모두 적용돼요.");
+  } catch (e) { say(e.message, true); }
+};
+
+// ---- 펜 끝 자동 교정
+function showTcpList(r) {
+  $("tcpList").textContent = r.poses.length ? r.poses.map((p) => `${p.index}. ${p.time} · 첫 자세와 펜 방향 차이 ${p.angle_from_first_deg}° · ${fmt(p.pose)}`).join("\n") + `\n(${r.poses.length}개 저장, ${4}개 이상 필요)` : "저장한 자세 없음";
+}
+async function loadTcp() { try { showTcpList(await api("/api/tcp")); } catch { /* 무시 */ } }
+$("tcpSave").onclick = async () => { try { const r = await api("/api/tcp/save", {}); showTcpList(r); say(`교정용 자세 ${r.poses.length}개 저장`); } catch (e) { say(e.message, true); } };
+$("tcpClear").onclick = async () => { if (confirm("교정용으로 저장한 자세를 모두 지울까요? (펜 설정은 그대로예요)")) { showTcpList(await api("/api/tcp/remove", { index: "all" })); $("tcpInfo").textContent = ""; } };
+function showTcpResult(r, applied) {
+  const [x, y, z] = r.offset;
+  $("tcpInfo").textContent = [`펜 끝 오프셋(도구 좌표계): x ${x} · y ${y} · z ${z}mm  (예상 오차 ±${Math.max(...r.sigma_mm)}mm)`,
+    `자세 ${r.poses}개 · 펜 방향 변화 최대 ${r.spread_deg}° · 자세별 펜 끝 흩어짐 ${r.residual_mm.map((v) => v + "mm").join(", ")} (작을수록 같은 점에 댄 거예요)`,
+    ...(r.warnings.length ? ["⚠ " + r.warnings.join(" ")] : []), ...(applied ? ["→ 펜 끝 설정에 적용했어요. 위 '펜 끝 · 기울기 보정'의 '저장하고 평면 확인'으로 확인하세요."] : [])].join("\n");
+}
+$("tcpSolve").onclick = async () => { try { showTcpResult(await api("/api/tcp/solve", {}), false); say("계산했어요(아직 적용은 안 했어요)."); } catch (e) { $("tcpInfo").textContent = ""; say(e.message, true); } };
+$("tcpApply").onclick = async () => { try { const r = await api("/api/tcp/apply", {}); showTcpResult(r, true); await loadPen(); say("펜 끝 설정에 적용했어요."); } catch (e) { say(e.message, true); } };
+
+// ---- 그리기 세팅 기억(이름으로 저장·불러오기 + 새로고침해도 마지막 값 유지)
+const DRAW_IDS = ["vecFill", "vecLevel", "vecPen", "drawAir", "drawRot", "drawMirror", "drawScale", "drawMargin", "drawLift", "drawVel", "drawCurve",
+  "drawStep", "drawSVel", "drawAvg", "drawFirst", "drawSeg", "drawMinStroke", "prevThick"];
+function collectDraw() {
+  const v = {}; DRAW_IDS.forEach((id) => { const e = $(id); v[id] = e.type === "checkbox" ? e.checked : e.value; }); v.drawMode = drawMode(); return v;
+}
+function applyDraw(v) {
+  if ("vecDetail" in v && !("vecLevel" in v)) v = { ...v, vecLevel: v.vecDetail ? 100 : 75 };                    // 예전 세팅(체크박스) 호환
+  DRAW_IDS.forEach((id) => { if (id in v) { const e = $(id); if (e.type === "checkbox") e.checked = !!v[id]; else e.value = v[id]; } });
+  if (v.drawMode) { const r = document.querySelector(`input[name=drawMode][value=${v.drawMode}]`); if (r) { r.checked = true; r.dispatchEvent(new Event("change")); } }
+  showLevel();
+}
+try { const saved = JSON.parse(localStorage.getItem("drawInputs") || "null"); if (saved) applyDraw(saved); } catch { /* 저장소를 못 쓰면 기본값 */ }
+$("drawCard").addEventListener("change", () => { try { localStorage.setItem("drawInputs", JSON.stringify(collectDraw())); } catch { /* 무시 */ } });
+let presets = {};
+function fillPresets(sel) {
+  const s = $("presetSel"); s.length = 1; Object.keys(presets).forEach((n) => s.append(new Option(n, n))); if (sel && presets[sel]) s.value = sel;
+}
+async function loadPresets(sel) { try { presets = await api("/api/presets"); fillPresets(sel); } catch { /* 무시 */ } }
+$("presetSave").onclick = async () => {
+  const name = $("presetName").value.trim() || $("presetSel").value;
+  if (!name) return say("저장할 세팅 이름을 입력해 주세요.", true);
+  try { presets = await api("/api/presets", { name, values: collectDraw() }); fillPresets(name); say(`'${name}' 세팅을 저장했어요(펜 굵기·내부 채우기·속도 등 이 카드의 값 전부).`); } catch (e) { say(e.message, true); }
+};
+$("presetLoad").onclick = () => {
+  const n = $("presetSel").value; if (!n || !presets[n]) return say("불러올 세팅을 골라 주세요.", true);
+  applyDraw(presets[n]); try { localStorage.setItem("drawInputs", JSON.stringify(collectDraw())); } catch { /* 무시 */ }
+  say(`'${n}' 세팅을 불러왔어요.` + ($("artSel").value ? " 그림을 이 세팅으로 다시 변환해요…" : ""));
+  if ($("artSel").value) $("artSel").onchange();
+};
+$("presetDel").onclick = async () => {
+  const n = $("presetSel").value; if (!n) return;
+  if (confirm(`'${n}' 세팅을 지울까요?`)) { try { presets = await api("/api/presets/delete", { name: n }); fillPresets(); say("지웠어요."); } catch (e) { say(e.message, true); } }
+};
+
+// ---- 펜 끝 고정 자세 변경
+const penBody = () => ({ mode: document.querySelector("input[name=penAct]:checked").value, dir: $("penDir").value, deg: Number($("penDeg").value), vel: Number($("penVel").value), confirm: $("penOk").checked });
+$("penAngle").onclick = async () => { try { const r = await api("/api/pen/angle"); $("penMove").textContent = `지금 펜 축은 판에 수직에서 ${r.pen_angle}° 기울어 있어요.`; } catch (e) { say(e.message, true); } };
+$("penPlan").onclick = async () => {
+  try { const r = await api("/api/pen/plan", penBody());
+    $("penMove").textContent = [`펜 끝 위치 ${r.tip.join(", ")}mm 를 고정한 채 ${r.angle_deg}° 회전 (${r.steps}단계)`, `펜 기울기(판 수직 기준) ${r.pen_angle_before}° → ${r.pen_angle_after}°`,
+      `손목(TCP)이 움직이는 거리 ${r.tcp_travel_mm}mm · 계산상 펜 끝 흔들림 ${r.tip_dev_mm}mm`].join("\n"); say("계산했어요. 로봇은 움직이지 않았어요."); } catch (e) { $("penMove").textContent = ""; say(e.message, true); }
+};
+$("penRun").onclick = async () => { try { const r = await api("/api/pen/run", penBody()); say(`시작했어요: 펜 기울기 ${r.pen_angle_before}° → ${r.pen_angle_after}°. 이상하면 정지(Esc).`); } catch (e) { say(e.message, true); } poll(); };
+$("penStop").onclick = async () => { try { await api("/api/stop", {}); say("정지했어요."); } catch (e) { say(e.message, true); } poll(); };
+
+const STEP = { retract: "뒤로 가는 중", advance: "앞으로 가는 중" };
+function lift(mode) {
+  return async () => {
+    try {
+      await api("/api/lift", { mode, mm: Number($("liftMm").value), vel: Number($("liftVel").value), confirm: $("liftOk").checked });
+      say("시작했어요. 이상하면 정지(Esc)를 누르세요.");
+    } catch (e) { say(e.message, true); }
+    poll();
+  };
+}
+$("liftRound").onclick = lift("roundtrip"); $("liftBack").onclick = lift("retract"); $("liftFwd").onclick = lift("advance");
+$("liftStop").onclick = async () => { try { await api("/api/stop", {}); say("정지했어요."); } catch (e) { say(e.message, true); } poll(); };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("liftStop").click(); });
+
+$("connectBtn").onclick = async () => {
+  $("connectBtn").disabled = true; say("로봇에 연결하는 중…");
+  try { const r = await api("/api/connect", { ip: $("ip").value }); say(`연결됨 (SDK ${r.sdk_version})`); }
+  catch (e) { say(e.message, true); }
+  $("connectBtn").disabled = false; poll();
+};
+$("clearAll").onclick = async () => { if (confirm("저장한 4곳을 모두 지울까요?")) { await api("/api/clear", { index: "all" }); say("모두 지웠어요."); poll(); } };
+
+build(); loadPresets(); loadArt(); loadPen(); loadTcp(); poll(); setInterval(poll, 1000);
+</script>
+</body>
+</html>

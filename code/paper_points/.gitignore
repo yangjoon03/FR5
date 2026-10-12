@@ -1,0 +1,11 @@
+paper_points.json
+paper_points.json.tmp
+__pycache__/
+.DS_Store
+paper_points_history.jsonl
+paper_settings.json
+paper_settings.json.tmp
+paper_tcp_poses.json
+paper_tcp_poses.json.tmp
+paper_presets.json
+paper_presets.json.tmp
