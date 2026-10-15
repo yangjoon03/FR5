@@ -8,7 +8,7 @@ import math
 import re
 import xml.etree.ElementTree as ET
 
-MAX_BYTES = 2_000_000
+MAX_BYTES = 8_000_000
 CURVE_STEPS = 32           # 3차/2차 베지에 하나를 나누는 직선 수
 ARC_STEP_DEG = 5.0         # 호를 나누는 각도 간격
 
@@ -241,7 +241,7 @@ def parse_svg(text):
     if not text or not text.strip():
         raise SvgError("SVG 내용이 비어 있어요.")
     if len(text.encode("utf-8")) > MAX_BYTES:
-        raise SvgError("SVG 파일이 너무 커요(2MB 이하).")
+        raise SvgError("SVG 파일이 너무 커요(8MB 이하).")
     low = text.lower()
     if "<!entity" in low or "<!doctype" in low and "[" in low:      # 외부/중첩 엔티티 확장 공격을 막는다
         raise SvgError("엔티티가 들어 있는 SVG 는 읽지 않아요.")

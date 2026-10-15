@@ -182,7 +182,7 @@ def waypoints(info, mode, air_mm=30.0):
 
     if mode == "air":
         if not MIN_AIR_MM <= air_mm <= MAX_AIR_MM:
-            raise LoopError(f"공중 높이는 {MIN_AIR_MM:.0f}~{MAX_AIR_MM:.0f}mm 사이여야 해요.")
+            raise LoopError(f"공중 높이는 {MIN_AIR_MM:.0f}~{MAX_AIR_MM:.0f}mm 사이여야 해요(지금 {air_mm:g}mm). '공중 높이(mm)' 칸을 고쳐 주세요.")
         return [("접근 (모서리 1 위)", at(0, air_mm)), ("모서리 2 위", at(1, air_mm)), ("모서리 3 위", at(2, air_mm)),
                 ("모서리 4 위", at(3, air_mm)), ("모서리 1 위 (한 바퀴 끝)", at(0, air_mm))]
     return [("접근 (모서리 1 위)", at(0, APPROACH_LIFT_MM)), ("모서리 1 (내려오기)", at(0, 0.0)), ("→ 모서리 2", at(1, 0.0)),

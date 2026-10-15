@@ -146,26 +146,52 @@
 
   <div class="card" id="drawCard">
     <h2 style="margin:0 0 6px;font-size:16px">SVG 그림 그리기</h2>
-    <p class="note">MindDraw가 그린 그림(PNG)은 선 굵기를 깎은 <b>중심선</b>으로 바꿔 SVG 획으로 만든 뒤 그려요(윤곽을 따라가면 한 선을 두 번 그려서요). 사진·PNG·JPG를 올려도 같아요. SVG 파일(또는 예시)을 저장한 사각 구역 <b>안에 비율을 지켜 맞추고</b>, 획마다 <b>펜 들기 → 이동 → 내리기 → 그리기</b>를 반복해요. 전체를 <b>끊김 없이 이어서</b> 보내요(원통과 같은 방식).
-      <b>곡선(스플라인)</b>을 켜면 획마다 컨트롤러 스플라인(NewSpline)으로 점들을 부드러운 곡선으로 지나가요(이 로봇에서는 아직 시험 전이라, 처음엔 <b>처음 N획만</b>을 2~3으로 해서 공중 연습하세요). 모든 도형의 <b>윤곽선</b>을 따라 그려요(채우기는 그리지 않아요). 먼저 "경로 보기"로 방향을 확인하세요: 어느 모서리가 위쪽인지는 저장 순서에 달려 있어서 <b>회전</b>으로 맞춰요. 처음에는 <b>공중 연습</b>으로 해 보세요.</p>
+    <p class="note">그림을 고르고 <b>펜 굵기</b>만 맞추면 선 변환·경로 계산·미리보기가 자동으로 돼요. 처음에는 <b>공중 연습</b>으로 해 보세요. 나머지 세팅은 맨 아래 "세부 설정"에 있고, 보통은 건드리지 않아도 돼요.</p>
+    <div class="row" style="margin-top:8px;align-items:center">
+      <select id="artSel"><option value="">MindDraw 그림 고르기…</option></select>
+      <button id="artReload" title="목록 새로고침">↻</button>
+      <input id="svgFile" type="file" accept=".svg,image/svg+xml,image/png,image/jpeg">
+      <button id="svgSample">예시 그림(집·해·별)</button>
+      <span class="note" id="svgName">선택된 그림 없음</span>
+    </div>
+    <div class="row" style="margin-top:8px;align-items:center">
+
+      <label title="종이에 실제로 그려지는 선 폭(mm)이에요. 0.27처럼 소수 둘째 자리까지 넣을 수 있어요. 표시된 굵기와 다르면 자로 재서 넣으세요.">펜 굵기(mm) <input id="vecPen" type="number" min="0.05" max="10" step="0.01" value="2" style="width:70px"></label>
+      <label style="display:inline-flex;align-items:center;gap:6px">디테일 <input id="vecLevel" type="range" min="0" max="100" step="5" value="100" style="width:160px"><b id="vecLevelTxt" style="min-width:3.2em">100%</b></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label><input type="radio" name="drawMode" value="air" checked> 공중 연습(종이에 안 닿음)</label>
+      <label><input type="radio" name="drawMode" value="draw"> 종이에 그리기</label>
+    </div>
+    <div id="prevBox" style="display:none;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:flex-start">
+      <div style="flex:1 1 220px;min-width:0"><div class="note" style="margin-bottom:4px">원본 그림</div>
+        <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:6px;text-align:center;overflow:hidden"><img id="origImg" alt="원본 그림" style="max-width:100%;max-height:340px;object-fit:contain"></div></div>
+      <div style="flex:2 1 320px;min-width:0"><div class="note" style="margin-bottom:4px">로봇이 그릴 모습(종이 구역 안)</div>
+        <svg id="drawPrev" viewBox="0 0 10 10" style="width:100%;max-height:340px;background:#fafafa;border:1px solid #ddd;border-radius:8px"></svg></div>
+    </div>
+    <label class="note" style="display:flex;gap:8px;margin:10px 0 4px;align-items:flex-start"><input id="drawOk" type="checkbox" style="margin-top:3px">
+      <span>로봇 이동 경로 주변이 비어 있고, 정지 버튼 옆에 손이 있어요. 로봇은 이미 활성화되어 있어요.</span></label>
+    <label class="note" id="drawDrawRow" style="display:none;gap:8px;margin:4px 0 10px;align-items:flex-start"><input id="drawDrawOk" type="checkbox" style="margin-top:3px">
+      <span>펜이 종이에 닿아도 안전해요(펜 끝·종이 높이를 확인했어요).</span></label>
+    <div class="row"><button id="drawPlan">경로 보기</button><button id="drawRun" class="primary">그리기 시작</button><button id="drawTrace" title="마지막 그리기에서 로봇이 실제로 지나간 경로를 미리보기 위에 빨갛게 겹쳐 봐요">실제 지나간 경로 겹쳐 보기</button></div>
+    <div class="row" style="margin-top:8px;align-items:center">
+      <button id="simPlay" title="로봇이 없어도 돼요. 계획한 순서대로 펜이 움직이는 모습을 미리보기 위에 빨갛게 그려 줘요(로봇은 움직이지 않아요)">▶ 그리는 모습 미리 보기(로봇 없이)</button>
+      <button id="simStop">■ 멈춤</button>
+      <label>배속 <select id="simSpeed"><option>1</option><option>2</option><option>5</option><option selected>10</option><option>30</option><option>100</option></select>×</label>
+      <span class="note" id="simInfo">로봇이 연결되어 그리는 중이면 이 빨간 선이 실제 진행(대략)을 따라가요.</span>
+    </div>
+    <button id="drawStop" style="width:100%;margin-top:10px;padding:14px;font-size:18px;font-weight:800;background:#d93636;color:#fff;border:0;border-radius:10px">■ 정지 (Esc)</button>
+    <div class="pose" id="drawInfo" style="margin-top:10px;white-space:pre-line"></div>
+    <details id="advDraw" style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">세부 설정 (보통은 건드릴 필요 없어요)</summary>
+    <p class="note">그림은 굵기를 깎은 중심선과(내부 채우기를 켜면) 굵은 부분을 채우는 안쪽 고리로 바뀌어 사각 구역 안에 비율을 지켜 맞춰져요. 획마다 <b>펜 들기 → 이동 → 내리기 → 그리기</b>를 반복해요. <b>곡선(스플라인)</b>은 이 로봇에서 아직 시험 전이라 켜면 처음엔 <b>처음 N획만</b>을 2~3으로 해서 공중 연습하세요. 어느 모서리가 위쪽인지는 저장 순서에 달려 있어서 <b>회전</b>으로 맞춰요.</p>
     <div class="row" style="margin-top:10px;align-items:center" id="presetRow">
       <label>저장한 세팅 <select id="presetSel"><option value="">(없음)</option></select></label>
       <button id="presetLoad">불러오기</button><button id="presetDel" class="danger">삭제</button>
       <input id="presetName" type="text" placeholder="세팅 이름(예: 보드마카 2mm)" maxlength="40" style="width:200px"><button id="presetSave" class="primary">현재 값 저장</button>
     </div>
     <div class="row" style="margin-top:8px">
-      <select id="artSel"><option value="">MindDraw 그림 고르기…</option></select>
-      <button id="artReload" title="목록 새로고침">↻</button>
       <label><input id="vecFill" type="checkbox" checked> 내부 채우기(원본과 같게)</label>
-      <label style="display:inline-flex;align-items:center;gap:6px">디테일 <input id="vecLevel" type="range" min="0" max="100" step="5" value="100" style="width:160px"><b id="vecLevelTxt" style="min-width:3.2em">100%</b></label>
-      <label>펜 끝 굵기(mm) <input id="vecPen" type="number" min="0.2" max="10" step="0.1" value="2" style="width:70px"></label>
-      <input id="svgFile" type="file" accept=".svg,image/svg+xml,image/png,image/jpeg">
-      <button id="svgSample">예시 그림(집·해·별)</button>
-      <span class="note" id="svgName">선택된 그림 없음</span>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <label><input type="radio" name="drawMode" value="air" checked> 공중 연습(종이에 안 닿음)</label>
-      <label><input type="radio" name="drawMode" value="draw"> 종이에 그리기</label>
+      <label>채우기 겹침(%) <input id="vecOverlap" type="number" min="0" max="60" step="5" value="30" style="width:60px"></label>
       <label>공중 높이(mm) <input id="drawAir" type="number" min="10" max="100" step="5" value="30" style="width:75px"></label>
     </div>
     <div class="row" style="margin-top:8px">
@@ -183,22 +209,13 @@
       <label>곡선 시간(ms) <input id="drawAvg" type="number" min="50" max="10000" step="50" value="2000" style="width:80px"></label>
       <label>처음 N획만(0=전부) <input id="drawFirst" type="number" min="0" max="500" step="1" value="0" style="width:70px"></label>
       <label>직선 이음 점 간격(mm) <input id="drawSeg" type="number" min="0.3" max="10" step="0.1" value="1.5" style="width:75px"></label>
+      <label>그리는 순서 <select id="drawOrder"><option value="topdown" selected>위에서 아래로(왼쪽→오른쪽)</option><option value="nearest">가까운 순서(이동 짧음)</option></select></label>
+      <label>종이 높이 미세조정(mm) <input id="drawTrim" type="number" min="-8" max="8" step="0.5" value="0" style="width:70px"></label>
+      <label>로봇 최소 점 간격(mm) <input id="drawFloor" type="number" min="0.3" max="5" step="0.1" value="1.0" style="width:70px"></label>
       <label>짧은 선 버리기(mm) <input id="drawMinStroke" type="number" min="0" max="30" step="0.5" value="0.6" style="width:75px"></label>
     </div>
     <label class="note" style="display:block;margin-top:10px"><input id="prevThick" type="checkbox" checked> 미리보기에 펜 굵기 반영(실제로 그려질 모습) <span>— 끄면 중심선만 보여요</span></label>
-    <div id="prevBox" style="display:none;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:flex-start">
-      <div style="flex:1 1 220px;min-width:0"><div class="note" style="margin-bottom:4px">원본 그림</div>
-        <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:6px;text-align:center;overflow:hidden"><img id="origImg" alt="원본 그림" style="max-width:100%;max-height:340px;object-fit:contain"></div></div>
-      <div style="flex:2 1 320px;min-width:0"><div class="note" style="margin-bottom:4px">로봇이 그릴 모습(종이 구역 안)</div>
-        <svg id="drawPrev" viewBox="0 0 10 10" style="width:100%;max-height:340px;background:#fafafa;border:1px solid #ddd;border-radius:8px"></svg></div>
-    </div>
-    <label class="note" style="display:flex;gap:8px;margin:10px 0 4px;align-items:flex-start"><input id="drawOk" type="checkbox" style="margin-top:3px">
-      <span>로봇 이동 경로 주변이 비어 있고, 정지 버튼 옆에 손이 있어요. 로봇은 이미 활성화되어 있어요.</span></label>
-    <label class="note" id="drawDrawRow" style="display:none;gap:8px;margin:4px 0 10px;align-items:flex-start"><input id="drawDrawOk" type="checkbox" style="margin-top:3px">
-      <span>펜이 종이에 닿아도 안전해요(펜 끝·종이 높이를 확인했어요).</span></label>
-    <div class="row"><button id="drawPlan">경로 보기</button><button id="drawRun" class="primary">그리기 시작</button></div>
-    <button id="drawStop" style="width:100%;margin-top:10px;padding:14px;font-size:18px;font-weight:800;background:#d93636;color:#fff;border:0;border-radius:10px">■ 정지 (Esc)</button>
-    <div class="pose" id="drawInfo" style="margin-top:10px;white-space:pre-line"></div>
+    </details>
   </div>
 
   <div class="card">
@@ -210,6 +227,17 @@
 const $ = (id) => document.getElementById(id);
 const NAMES = ["모서리 1 (왼쪽 위)", "모서리 2 (오른쪽 위)", "모서리 3 (오른쪽 아래)", "모서리 4 (왼쪽 아래)"];
 let connected = false;
+
+// 숫자 입력칸을 읽는다: 비었거나 숫자가 아니면 기본값으로, 범위(min/max)를 벗어나면 가까운 값으로 고쳐서 칸에도 되돌려 쓴다(서버에서 "~사이여야 해요"로 막히지 않게)
+function readNum(id) {
+  const el = $(id);
+  let v = Number(el.value);
+  if (String(el.value).trim() === "" || !Number.isFinite(v)) v = Number(el.defaultValue);
+  const lo = el.min ? Number(el.min) : -Infinity, hi = el.max ? Number(el.max) : Infinity;
+  const c = Math.min(hi, Math.max(lo, v));
+  if (String(c) !== String(el.value).trim()) el.value = c;
+  return c;
+}
 
 async function api(path, body) {
   const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" },
@@ -250,9 +278,10 @@ async function poll() {
     const cy = s.cyl || {}, dr = s.draw || {}, drawBusy = dr.state === "running", cylBusy = cy.state === "running" || drawBusy;
     $("cylRun").disabled = !s.connected || busy || cylBusy;
     $("drawRun").disabled = !s.connected || busy || cylBusy || (s.loop || {}).state === "running";
+    if (drawBusy || (SIM.mode === "real" && dr.state !== "idle")) simFollow(dr);
     if (drawBusy || ["done", "stopped", "error"].includes(dr.state)) {
       const head = drawBusy ? `진행: 보낸 점 ${dr.sent}/${dr.total} · 로봇이 지나간 점 ${dr.reached}/${dr.total} · ${dr.step}` : dr.state === "done" ? "그림을 다 그렸어요." : dr.state === "stopped" ? "정지했어요. (그 자리에 있어요)" : "오류: " + dr.error;
-      $("drawInfo").textContent = head + `\n앞서 보낸 점 최대 ${dr.ahead_max}개 · 보내는 속도가 못 따라가 끊겼을 수 있는 횟수 ${dr.starved}` + (dr.fallback ? `\n곡선이 안 되어 직선으로 대체한 횟수 ${dr.fallback}` : "") + (s.stale ? "\n(이동 중이라 위치 표시는 직전 값이에요)" : "");
+      $("drawInfo").textContent = head + `\n앞서 보낸 점 최대 ${dr.ahead_max}개 · 보내는 속도가 못 따라가 끊겼을 수 있는 횟수 ${dr.starved}` + (dr.track ? `\n로봇이 계획 경로를 따라간 정확도: 평균 ${dr.track.mean}mm · 95% ${dr.track.p95}mm · 최대 ${dr.track.max}mm (측정 ${dr.track.n}점)` : "") + (dr.fallback ? `\n곡선이 안 되어 직선으로 대체한 횟수 ${dr.fallback}` : "") + (s.stale ? "\n(이동 중이라 위치 표시는 직전 값이에요)" : "");
     }
     if (cy.state === "running" || ["done", "stopped", "error"].includes(cy.state)) {
       const head = cy.state === "running" ? `진행: 보낸 점 ${cy.sent}/${cy.total} · 로봇이 지나간 점 ${cy.reached}/${cy.total} · ${cy.step}` : cy.state === "done" ? "원통을 다 그렸어요." : cy.state === "stopped" ? "정지했어요. (그 자리에 있어요)" : "오류: " + cy.error;
@@ -292,7 +321,7 @@ const loopMode = () => document.querySelector('input[name=loopMode]:checked').va
 document.querySelectorAll('input[name=loopMode]').forEach((r) => r.addEventListener("change", () => { $("loopDrawRow").style.display = loopMode() === "draw" ? "flex" : "none"; $("loopRun").textContent = loopMode() === "draw" ? "테두리 그리기 시작" : "한 바퀴 시작"; }));
 $("loopPlan").onclick = async () => {
   try {
-    const r = await api("/api/loop/plan", { mode: loopMode(), air_mm: Number($("loopAir").value) });
+    const r = await api("/api/loop/plan", { mode: loopMode(), air_mm: readNum("loopAir") });
     const L = [`변 길이(mm): ${r.sides_mm.join(", ")} · 각도: ${r.angles_deg.join("°, ")}° · 평면 벗어남 ${r.flatness_mm}mm`];
     r.waypoints.forEach((w, i) => L.push(`${i + 1}. ${w.name}: x ${w.pose[0].toFixed(1)}  y ${w.pose[1].toFixed(1)}  z ${w.pose[2].toFixed(1)}`));
     if (r.warnings.length) L.push("⚠ " + r.warnings.join(" "));
@@ -301,15 +330,15 @@ $("loopPlan").onclick = async () => {
 };
 $("loopRun").onclick = async () => {
   try {
-    await api("/api/loop/run", { mode: loopMode(), air_mm: Number($("loopAir").value), vel: Number($("loopVel").value), confirm: $("loopOk").checked, confirm_draw: $("loopDrawOk").checked });
+    await api("/api/loop/run", { mode: loopMode(), air_mm: readNum("loopAir"), vel: readNum("loopVel"), confirm: $("loopOk").checked, confirm_draw: $("loopDrawOk").checked });
     say("시작했어요. 이상하면 정지(Esc)를 누르세요.");
   } catch (e) { say(e.message, true); }
   poll();
 };
 $("loopStop").onclick = async () => { try { await api("/api/stop", {}); say("정지했어요."); } catch (e) { say(e.message, true); } poll(); };
 
-const cylBody = () => ({ r: Number($("cylR").value), z0: Number($("cylZ0").value), height: Number($("cylH").value),
-  segments: Number($("cylSeg").value), vel: Number($("cylVel").value), confirm: $("cylOk").checked });
+const cylBody = () => ({ r: readNum("cylR"), z0: readNum("cylZ0"), height: readNum("cylH"),
+  segments: Number($("cylSeg").value), vel: readNum("cylVel"), confirm: $("cylOk").checked });
 $("cylCheck").onclick = async () => {
   try { const r = await api("/api/cyl/check", {});
     $("cylInfo").textContent = `위치 읽기 정상 · 한 번 읽는 데 약 ${r.read_ms}ms · ${fmt(r.tcp)}`;
@@ -340,7 +369,7 @@ let lastVec = null;
 async function vectorize(body, name) {
   lastVec = { body, name };
   say("그림을 선으로 바꾸는 중…");
-  try { const r = await api("/api/draw/vectorize", body); vecPenMm = body.pen_mm; useSvg(r.svg, `${name} → 획 ${r.strokes}개 · 펜 ${r.pen_mm}mm 기준`); say(`획 ${r.strokes}개로 바꿨어요. "경로 보기"를 눌러 확인하세요.` + (r.warning ? " ⚠ " + r.warning : ""), !!r.warning); }
+  try { const r = await api("/api/draw/vectorize", body); vecPenMm = body.pen_mm; useSvg(r.svg, `${name} → 획 ${r.strokes}개 · 펜 ${r.pen_mm}mm 기준`); say(`획 ${r.strokes}개로 바꿨어요.` + (r.warning ? " ⚠ " + r.warning : ""), !!r.warning); await $("drawPlan").onclick(); }
   catch (e) { say(e.message, true); }
 }
 async function loadArt() {
@@ -348,19 +377,19 @@ async function loadArt() {
     r.images.forEach((n) => sel.append(new Option(n, n))); sel.value = r.images.includes(cur) ? cur : ""; } catch { /* 무시 */ }
 }
 $("artReload").onclick = loadArt;
-const vecOpts = () => ({ fill: $("vecFill").checked, detail_level: Number($("vecLevel").value), pen_mm: Number($("vecPen").value), rotate: Number($("drawRot").value), mirror: $("drawMirror").checked,
-  scale_pct: Number($("drawScale").value), margin: Number($("drawMargin").value) });
+const vecOpts = () => ({ overlap: readNum("vecOverlap"), fill: $("vecFill").checked, detail_level: readNum("vecLevel"), pen_mm: readNum("vecPen"), rotate: readNum("drawRot"), mirror: $("drawMirror").checked,
+  scale_pct: readNum("drawScale"), margin: readNum("drawMargin") });
 $("artSel").onchange = () => { const n = $("artSel").value; if (n) { origSrc = `/api/draw/image/${n}`; vectorize({ name: n, ...vecOpts() }, n); } };
 $("svgFile").onchange = async (e) => {
   const f = e.target.files[0]; if (!f) return;
   origSrc = URL.createObjectURL(f);
-  if (/svg/.test(f.type) || /\.svg$/i.test(f.name)) return useSvg(await f.text(), f.name);
+  if (/svg/.test(f.type) || /\.svg$/i.test(f.name)) { lastVec = null; useSvg(await f.text(), f.name); return autoRefresh(false); }
   const b64 = await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1]); fr.readAsDataURL(f); });
   vectorize({ image_b64: b64, ...vecOpts() }, f.name);
 };
-$("svgSample").onclick = () => { origSrc = svgUrl(SAMPLE_SVG); useSvg(SAMPLE_SVG, "예시 그림"); };
-const drawBody = () => ({ svg: svgText, detail_level: Number($("vecLevel").value), pen_mm: Number($("vecPen").value), mode: drawMode(), air_mm: Number($("drawAir").value), rotate: Number($("drawRot").value), mirror: $("drawMirror").checked,
-  scale_pct: Number($("drawScale").value), margin: Number($("drawMargin").value), lift: Number($("drawLift").value), min_seg: Number($("drawSeg").value), curve: $("drawCurve").checked, curve_step: Number($("drawStep").value), avg_ms: Number($("drawAvg").value), spline_vel: Number($("drawSVel").value) || 0, first_n: Number($("drawFirst").value), min_stroke: Number($("drawMinStroke").value), vel: Number($("drawVel").value),
+$("svgSample").onclick = () => { origSrc = svgUrl(SAMPLE_SVG); lastVec = null; useSvg(SAMPLE_SVG, "예시 그림"); autoRefresh(false); };
+const drawBody = () => ({ svg: svgText, detail_level: readNum("vecLevel"), pen_mm: readNum("vecPen"), mode: drawMode(), air_mm: readNum("drawAir"), rotate: readNum("drawRot"), mirror: $("drawMirror").checked,
+  scale_pct: readNum("drawScale"), margin: readNum("drawMargin"), lift: readNum("drawLift"), min_seg: readNum("drawSeg"), seg_floor: readNum("drawFloor"), trim: readNum("drawTrim") || 0, order: $("drawOrder").value, curve: $("drawCurve").checked, curve_step: readNum("drawStep"), avg_ms: readNum("drawAvg"), spline_vel: Number($("drawSVel").value) || 0, first_n: Number($("drawFirst").value), min_stroke: readNum("drawMinStroke"), vel: readNum("drawVel"),
   confirm: $("drawOk").checked, confirm_draw: $("drawDrawOk").checked });
 function preview(r) {
   const NS = "http://www.w3.org/2000/svg", svg = $("drawPrev"); svg.replaceChildren();
@@ -370,7 +399,7 @@ function preview(r) {
   const el = (t, a) => { const n = document.createElementNS(NS, t); Object.entries(a).forEach(([k, v]) => n.setAttribute(k, v)); svg.append(n); return n; };
   el("polygon", { points: r.paper.map((p) => `${p[0]},${-p[1]}`).join(" "), fill: "#fff", stroke: "#999", "stroke-width": 0.6 });
   // 실제로 그려질 모습: 선 굵기를 펜 끝 굵기(mm)로 그린다(단위가 mm 라서 그대로 맞는다). 끄면 중심선만 가늘게 보인다.
-  const thick = $("prevThick").checked, penW = Math.max(0.3, Number($("vecPen").value) || 0.8);
+  const thick = $("prevThick").checked, penW = Math.max(0.05, readNum("vecPen") || 0.8);          // 실제 굵기 그대로(틈이 있으면 틈이 보인다)
   r.strokes.forEach((s) => el("polyline", { points: s.map((p) => `${p[0]},${-p[1]}`).join(" "), fill: "none", stroke: thick ? "#111" : "#1a56db", "stroke-width": thick ? penW : 0.8,
     "stroke-linecap": "round", "stroke-linejoin": "round" }));
   const f = (x1 - x0) / 40;
@@ -378,26 +407,127 @@ function preview(r) {
   $("prevBox").style.display = "flex";
   const o = $("origImg");
   if (origSrc) { if (o.getAttribute("src") !== origSrc) o.src = origSrc;
-    o.style.transform = `rotate(${-Number($("drawRot").value)}deg) scaleX(${$("drawMirror").checked ? -1 : 1})`; }       // 계획과 같은 회전·반전으로 보여 준다
+    o.style.transform = `rotate(${-readNum("drawRot")}deg) scaleX(${$("drawMirror").checked ? -1 : 1})`; }       // 계획과 같은 회전·반전으로 보여 준다
   $("origImg").parentElement.parentElement.style.display = origSrc ? "" : "none";
 }
-$("prevThick").onchange = () => { if (lastPlan) preview(lastPlan); };
+$("prevThick").onchange = () => { simStop(); if (lastPlan) preview(lastPlan); };
+
+// ---- 그리는 모습 미리 보기: 계획한 획 순서대로 빨간 선이 그어지고 빨간 점(펜 끝)이 따라간다. 로봇 연결과 무관(브라우저 안에서만 계산).
+// 로봇이 실제로 그리는 중이면 같은 빨간 선을 로봇이 지나간 점 수 비율(대략)로 그려 준다.
+const SIM = { segs: [], cum: [], total: 0, done: 0, layer: null, chunk: null, chunkD: "", cur: null, dot: null, raf: 0, dist: 0, last: 0, mode: "" };
+function simBuild() {
+  // 획 사이는 펜을 든 이동(연한 선)으로 잇는다
+  const segs = []; let prev = null;
+  for (const s of lastPlan.strokes) {
+    if (!s.length) continue;
+    if (prev) segs.push({ a: prev, b: s[0], down: false });
+    for (let i = 1; i < s.length; i++) segs.push({ a: s[i - 1], b: s[i], down: true });
+    prev = s[s.length - 1];
+  }
+  const cum = new Float64Array(segs.length + 1);
+  segs.forEach((g, i) => { g.len = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1]); cum[i + 1] = cum[i] + g.len; });
+  Object.assign(SIM, { segs, cum, total: cum[segs.length], done: 0 });
+}
+function simLayer() {                                    // 미리보기를 다시 그리고(계획은 연하게) 그 위에 빨간 층을 만든다
+  const NS = "http://www.w3.org/2000/svg", svg = $("drawPrev");
+  preview(lastPlan);
+  svg.querySelectorAll("polyline").forEach((p) => { p.setAttribute("stroke", "#c8c8c8"); });
+  const g = document.createElementNS(NS, "g"); svg.append(g);
+  const dot = document.createElementNS(NS, "circle"), pen = Math.max(0.5, readNum("vecPen") || 0.8);
+  dot.setAttribute("r", Math.max(1.2, pen * 1.2)); dot.setAttribute("fill", "#e11"); dot.setAttribute("stroke", "#fff"); dot.setAttribute("stroke-width", 0.3); dot.style.display = "none";
+  const cur = document.createElementNS(NS, "line"); cur.setAttribute("stroke-linecap", "round");
+  svg.append(cur, dot);
+  Object.assign(SIM, { layer: g, dot, cur, chunk: null, chunkD: "", done: 0 });
+}
+function simPaint(dist) {                                // dist(mm) 까지 빨갛게 그린다(앞으로만 진행, 되돌아가면 처음부터)
+  const NS = "http://www.w3.org/2000/svg", { segs, cum } = SIM, pen = Math.max(0.5, readNum("vecPen") || 0.8);
+  if (dist < cum[SIM.done] - 1e-6) simLayer();
+  let lo = SIM.done, hi = segs.length;                   // dist 를 포함하는 구간 번호 찾기
+  while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m + 1] <= dist) lo = m + 1; else hi = m; }
+  const flush = () => { if (SIM.chunk) SIM.chunk.setAttribute("d", SIM.chunkD); };
+  const newChunk = (down) => { const p = document.createElementNS(NS, "path"); p.setAttribute("fill", "none"); p.setAttribute("stroke-linecap", "round");
+    p.setAttribute("stroke", down ? "#e11" : "#f4a0a0"); p.setAttribute("stroke-width", down ? pen : 0.25); if (!down) p.setAttribute("stroke-dasharray", "1 1"); SIM.layer.append(p); SIM.chunk = p; SIM.chunkD = ""; SIM.chunkDown = down; SIM.chunkN = 0; };
+  for (let i = SIM.done; i < lo && i < segs.length; i++) {
+    const g = segs[i];
+    if (!SIM.chunk || SIM.chunkDown !== g.down || SIM.chunkN >= 400) { flush(); newChunk(g.down); }
+    SIM.chunkD += `M${g.a[0]},${-g.a[1]}L${g.b[0]},${-g.b[1]}`; SIM.chunkN++;
+  }
+  flush(); SIM.done = Math.min(lo, segs.length);
+  const cur = SIM.cur, dot = SIM.dot;
+  if (lo < segs.length) {                                // 지금 지나가는 구간의 일부 + 빨간 점
+    const g = segs[lo], t = g.len > 0 ? Math.min(1, Math.max(0, (dist - cum[lo]) / g.len)) : 1, x = g.a[0] + (g.b[0] - g.a[0]) * t, y = g.a[1] + (g.b[1] - g.a[1]) * t;
+    cur.setAttribute("x1", g.a[0]); cur.setAttribute("y1", -g.a[1]); cur.setAttribute("x2", x); cur.setAttribute("y2", -y);
+    cur.setAttribute("stroke", g.down ? "#e11" : "#f4a0a0"); cur.setAttribute("stroke-width", g.down ? pen : 0.25); cur.style.display = "";
+    dot.setAttribute("cx", x); dot.setAttribute("cy", -y); dot.style.display = "";
+  } else { cur.style.display = "none"; if (segs.length) { const e = segs[segs.length - 1].b; dot.setAttribute("cx", e[0]); dot.setAttribute("cy", -e[1]); dot.style.display = ""; } }
+}
+function simStop() { if (SIM.raf) cancelAnimationFrame(SIM.raf); SIM.raf = 0; SIM.mode = SIM.mode === "sim" ? "" : SIM.mode; }
+async function simStart() {
+  if (!svgText) return say("먼저 SVG 파일을 고르거나 예시 그림을 눌러 주세요.", true);
+  if (!lastPlan) { await $("drawPlan").onclick(); if (!lastPlan) return; }
+  simStop(); simBuild();
+  if (!SIM.total) return say("그릴 선이 없어요.", true);
+  simLayer(); SIM.mode = "sim"; SIM.dist = 0; SIM.last = performance.now();
+  const BASE = 40;                                         // 배속 1× 의 펜 속도(mm/s). 이동(펜 든)은 같은 속도로 보여 준다
+  const tick = (now) => {
+    const sp = Number($("simSpeed").value) || 10;
+    SIM.dist += Math.min(0.1, (now - SIM.last) / 1000) * BASE * sp; SIM.last = now;
+    simPaint(Math.min(SIM.dist, SIM.total));
+    const pct = Math.min(100, SIM.dist / SIM.total * 100);
+    $("simInfo").textContent = `미리 보기 ${pct.toFixed(0)}% · 그린 길이 ${Math.min(SIM.dist, SIM.total).toFixed(0)} / ${SIM.total.toFixed(0)}mm (로봇은 움직이지 않아요)`;
+    if (SIM.dist >= SIM.total) { SIM.raf = 0; SIM.mode = ""; $("simInfo").textContent = `미리 보기가 끝났어요 · 그린 길이 ${SIM.total.toFixed(0)}mm`; return; }
+    SIM.raf = requestAnimationFrame(tick);
+  };
+  SIM.raf = requestAnimationFrame(tick);
+}
+$("simPlay").onclick = simStart;
+$("simStop").onclick = () => { simStop(); $("simInfo").textContent = "멈췄어요(로봇과 상관없어요)."; };
+// 로봇이 실제로 그리는 중: 지나간 점 수 비율로 같은 빨간 선을 따라 그린다(대략)
+function simFollow(dr) {
+  if (!lastPlan || SIM.mode === "sim" || !dr.total) return;
+  if (SIM.mode !== "real") { simBuild(); simLayer(); SIM.mode = "real"; }
+  const f = Math.min(1, dr.reached / dr.total), n = SIM.segs.length;
+  simPaint(SIM.cum[Math.min(n, Math.round(f * n))]);
+  $("simInfo").textContent = `로봇 진행(대략) ${(f * 100).toFixed(0)}% · 지나간 점 ${dr.reached}/${dr.total}`;
+  if (dr.state !== "running") SIM.mode = "";
+}
 // 디테일 슬라이더: 움직이면 잠깐 뒤 같은 그림을 그 수준으로 다시 변환하고 경로 미리보기를 갱신한다
 const showLevel = () => { $("vecLevelTxt").textContent = $("vecLevel").value + "%"; };
 let levelTimer = null;
 $("vecLevel").addEventListener("input", () => {
   showLevel(); clearTimeout(levelTimer);
-  levelTimer = setTimeout(async () => { if (lastVec) { await vectorize({ ...lastVec.body, ...vecOpts() }, lastVec.name); if (svgText) $("drawPlan").click(); } }, 450);
+  levelTimer = setTimeout(async () => { if (lastVec) await vectorize({ ...lastVec.body, ...vecOpts() }, lastVec.name); else if (svgText) await $("drawPlan").onclick(); }, 450);
 });
 showLevel();
+
+// 마지막 그리기에서 로봇이 실제로 지나간 펜 끝 경로(빨강)를 미리보기(계획) 위에 겹쳐 본다: 진한 빨강 = 종이 높이 1.5mm 이내(닿았을 높이), 연한 빨강 = 들고 이동
+$("drawTrace").onclick = async () => {
+  try {
+    const r = await api("/api/draw/trace");
+    if (!r.uv.length) return say("아직 기록된 경로가 없어요. 그리기를 한 번 끝낸(또는 정지한) 뒤에 눌러 주세요.", true);
+    if (!lastPlan) return say("먼저 '경로 보기'로 같은 그림의 계획을 띄워 주세요.", true);
+    preview(lastPlan);
+    const svg = $("drawPrev"), NS = "http://www.w3.org/2000/svg";
+    const segs = []; let cur = null;
+    for (const [u, v, h] of r.uv) {
+      const down = h <= 1.5;
+      if (!cur || cur.down !== down || Math.hypot(u - cur.last[0], v - cur.last[1]) > 6) { cur = { down, pts: [], last: [u, v] }; segs.push(cur); }
+      cur.pts.push(`${u},${-v}`); cur.last = [u, v];
+    }
+    for (const s of segs) { if (s.pts.length < 2) continue;
+      const pl = document.createElementNS(NS, "polyline"); pl.setAttribute("points", s.pts.join(" ")); pl.setAttribute("fill", "none");
+      pl.setAttribute("stroke", s.down ? "#e11" : "#f99"); pl.setAttribute("stroke-width", s.down ? 0.35 : 0.2); pl.setAttribute("stroke-opacity", s.down ? 0.9 : 0.6); svg.append(pl); }
+    say(`로봇이 실제로 지나간 경로를 빨갛게 겹쳤어요(${r.time}). 검정(계획)과 어긋난 곳이 로봇이 못 따라간 곳이에요.`);
+  } catch (e) { say(e.message, true); }
+};
 
 let lastPlan = null;
 $("drawPlan").onclick = async () => {
   if (!svgText) return say("먼저 SVG 파일을 고르거나 예시 그림을 눌러 주세요.", true);
   try { const r = await api("/api/draw/plan", drawBody()), i = r.info;
-    lastPlan = r; preview(r);
+    lastPlan = r; simStop(); SIM.mode = ""; preview(r);
     $("drawInfo").textContent = [`획 ${i.strokes}개 · ${i.curve ? "조절점" : "점"} ${i.points}개 · 그림 ${i.size_mm[0]}×${i.size_mm[1]}mm (배율 ${i.scale}) · 그리는 선 ${i.pen_mm}mm · 총 이동 ${i.path_mm}mm`,
-      `${i.pen_width_mm ? `변환 때 쓴 펜 굵기 ${i.pen_width_mm}mm${vecPenMm && Math.abs(i.pen_width_mm - vecPenMm) > 0.15 ? " (⚠ 종이·크기·회전이 바뀌었으니 그림을 다시 골라 변환하세요)" : ""} · ` : ""}그리는 높이 ${i.pen_height_mm}mm · 펜 든 높이 ${i.lift_height_mm}mm (종이 기준)`, `시작점: x ${r.start[0].toFixed(1)}  y ${r.start[1].toFixed(1)}  z ${r.start[2].toFixed(1)}`,
+      `${i.pen_width_mm ? `변환 때 쓴 펜 굵기 ${i.pen_width_mm}mm${vecPenMm && i.pen_width_mm - vecPenMm > 0.05 ? " (입력한 굵기보다 굵어요: 이 그림은 해상도 한계로 이보다 촘촘하게 나눌 수 없어요)" : ""} · ` : ""}그리는 높이 ${i.pen_height_mm}mm · 펜 든 높이 ${i.lift_height_mm}mm (종이 기준)`, `시작점: x ${r.start[0].toFixed(1)}  y ${r.start[1].toFixed(1)}  z ${r.start[2].toFixed(1)}`,
       ...(r.warnings.length ? ["⚠ " + r.warnings.join(" ")] : [])].join("\n");
     say("경로를 계산했어요. 로봇은 움직이지 않았어요. 빨간 숫자는 저장한 모서리 번호예요."); } catch (e) { $("drawInfo").textContent = ""; say(e.message, true); }
 };
@@ -447,9 +577,22 @@ function showTcpResult(r, applied) {
 $("tcpSolve").onclick = async () => { try { showTcpResult(await api("/api/tcp/solve", {}), false); say("계산했어요(아직 적용은 안 했어요)."); } catch (e) { $("tcpInfo").textContent = ""; say(e.message, true); } };
 $("tcpApply").onclick = async () => { try { const r = await api("/api/tcp/apply", {}); showTcpResult(r, true); await loadPen(); say("펜 끝 설정에 적용했어요."); } catch (e) { say(e.message, true); } };
 
+// ---- 자동 갱신: 펜 굵기·회전 같은 값을 바꾸면 변환과 경로 계산을 알아서 다시 해서 미리보기를 맞춘다
+const VEC_IDS = ["vecFill", "vecPen", "vecOverlap", "drawRot", "drawMirror", "drawScale", "drawMargin"];
+const NO_AUTO = ["presetSel", "presetName", "simSpeed", "drawOk", "drawDrawOk", "artSel", "svgFile", "vecLevel", "prevThick"];
+let autoTimer = null;
+function autoRefresh(revec) {
+  clearTimeout(autoTimer);
+  autoTimer = setTimeout(async () => {
+    if (!svgText) return;
+    if (revec && lastVec) await vectorize({ ...lastVec.body, ...vecOpts() }, lastVec.name); else await $("drawPlan").onclick();
+  }, 400);
+}
+$("drawCard").addEventListener("change", (e) => { const id = e.target.id; if (NO_AUTO.includes(id) || !svgText) return; autoRefresh(VEC_IDS.includes(id)); });
+
 // ---- 그리기 세팅 기억(이름으로 저장·불러오기 + 새로고침해도 마지막 값 유지)
-const DRAW_IDS = ["vecFill", "vecLevel", "vecPen", "drawAir", "drawRot", "drawMirror", "drawScale", "drawMargin", "drawLift", "drawVel", "drawCurve",
-  "drawStep", "drawSVel", "drawAvg", "drawFirst", "drawSeg", "drawMinStroke", "prevThick"];
+const DRAW_IDS = ["vecFill", "vecLevel", "vecPen", "vecOverlap", "drawAir", "drawRot", "drawMirror", "drawScale", "drawMargin", "drawLift", "drawVel", "drawCurve",
+  "drawStep", "drawSVel", "drawAvg", "drawFirst", "drawSeg", "drawFloor", "drawTrim", "drawOrder", "drawMinStroke", "prevThick"];
 function collectDraw() {
   const v = {}; DRAW_IDS.forEach((id) => { const e = $(id); v[id] = e.type === "checkbox" ? e.checked : e.value; }); v.drawMode = drawMode(); return v;
 }
@@ -497,7 +640,7 @@ const STEP = { retract: "뒤로 가는 중", advance: "앞으로 가는 중" };
 function lift(mode) {
   return async () => {
     try {
-      await api("/api/lift", { mode, mm: Number($("liftMm").value), vel: Number($("liftVel").value), confirm: $("liftOk").checked });
+      await api("/api/lift", { mode, mm: readNum("liftMm"), vel: readNum("liftVel"), confirm: $("liftOk").checked });
       say("시작했어요. 이상하면 정지(Esc)를 누르세요.");
     } catch (e) { say(e.message, true); }
     poll();

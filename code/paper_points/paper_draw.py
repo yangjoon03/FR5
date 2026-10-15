@@ -39,11 +39,17 @@ SPLINE_MIN_MM = 8.0         # 조각 전체 길이가 이보다 짧으면 스플
 CURVE_DENSE_MM = 0.3        # 곡선 모드에서 먼저 선을 이 간격으로 촘촘히 고르게 찍어 놓고 다듬는다
 CURVE_CORNER_WINDOW_MM = 1.5
 CURVE_SMOOTH_PTS = 3        # 조각 안에서 앞뒤 이만큼(점 수)의 평균으로 계단 흔들림을 없앤다
+ORDER_BAND_FRAC = 0.06      # 위에서 아래로 그릴 때 같은 줄로 묶는 띠의 높이(그림 높이 비율)
+ORDER_BAND_MIN_MM = 6.0
 ROTATIONS = (0, 90, 180, 270)
 
 
 class DrawError(ValueError):
     """사용자에게 그대로 보여 줄 한국어 오류."""
+
+
+class TooManyPoints(DrawError):
+    """점이 최대 개수를 넘었다(점 간격을 넓혀 다시 계산하면 된다)."""
 
 
 def _rdp(pts, tol):
@@ -140,15 +146,15 @@ def _inside(poly, p, margin):
 
 
 def plan(info, polylines, *, rotate=0, mirror=False, margin=MARGIN_MM, scale_pct=100.0, lift=8.0, mode="air", air_mm=30.0,
-         tol=TOL_MM, min_seg=MIN_SEG_MM, min_stroke=MIN_STROKE_MM, curve=False, curve_step=CURVE_STEP_MM, first_n=0, keep_dots=False):
+         tol=TOL_MM, min_seg=MIN_SEG_MM, min_stroke=MIN_STROKE_MM, curve=False, curve_step=CURVE_STEP_MM, first_n=0, keep_dots=False, trim=0.0, order="topdown"):
     if mode not in ("air", "draw"):
         raise DrawError("방식을 골라 주세요(공중 연습 / 종이에 그리기).")
     if rotate not in ROTATIONS:
         raise DrawError("회전은 0, 90, 180, 270 중에서 골라 주세요.")
     if not MIN_LIFT_MM <= lift <= MAX_LIFT_MM:
-        raise DrawError(f"펜 드는 높이는 {MIN_LIFT_MM:.0f}~{MAX_LIFT_MM:.0f}mm 사이여야 해요.")
+        raise DrawError(f"펜 드는 높이는 {MIN_LIFT_MM:.0f}~{MAX_LIFT_MM:.0f}mm 사이여야 해요(지금 {lift:g}mm).")
     if mode == "air" and not MIN_AIR_MM <= air_mm <= MAX_AIR_MM:
-        raise DrawError(f"공중 높이는 {MIN_AIR_MM:.0f}~{MAX_AIR_MM:.0f}mm 사이여야 해요.")
+        raise DrawError(f"공중 연습의 공중 높이는 {MIN_AIR_MM:.0f}~{MAX_AIR_MM:.0f}mm 사이여야 해요(지금 {air_mm:g}mm). '공중 높이(mm)' 칸을 고치거나, 종이에 그리기를 고르세요.")
     if not 5.0 <= margin <= 100.0:
         raise DrawError("여백은 5~100mm 사이여야 해요.")
     if not 10.0 <= scale_pct <= 100.0:
@@ -157,6 +163,8 @@ def plan(info, polylines, *, rotate=0, mirror=False, margin=MARGIN_MM, scale_pct
         raise DrawError("선 단순화 오차는 0.02~2mm 사이여야 해요.")
     if not 2.0 <= curve_step <= 15.0:
         raise DrawError("곡선 조절점 최대 간격은 2~15mm 사이여야 해요.")
+    if order not in ("topdown", "nearest"):
+        raise DrawError("그리는 순서는 위에서 아래로 / 가까운 순서 중에서 골라 주세요.")
     if first_n < 0:
         raise DrawError("처음 몇 획만 그릴지는 0 이상이어야 해요(0 = 전부).")
     step = CURVE_DENSE_MM if curve else min_seg
@@ -214,7 +222,7 @@ def plan(info, polylines, *, rotate=0, mirror=False, margin=MARGIN_MM, scale_pct
             continue
         st2 = _resample(_rdp(dedup, tol), step)
         if len(st2) < 2 or _length(st2) < max(min_stroke, 0.5):
-            if keep_dots:                                      # 점·아주 짧은 선도 버리지 않고 짧은 선분(점 찍기)으로 남긴다
+            if keep_dots and math.dist(dedup[0], dedup[-1]) <= 0.3 * max(_length(dedup), 1e-6):   # 닫힌 작은 점만 짧은 선분(점 찍기)으로 남긴다. 끊어진 짧은 조각은 점이 아니라 찌꺼기라 버린다
                 a, b = dedup[0], dedup[-1]
                 cx, cy = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
                 dx, dy = b[0] - a[0], b[1] - a[1]
@@ -228,25 +236,46 @@ def plan(info, polylines, *, rotate=0, mirror=False, margin=MARGIN_MM, scale_pct
     if not cleaned:
         raise DrawError("그릴 수 있는 선이 남지 않았어요(너무 짧거나 작아요).")
 
-    # 4) 순서 정하기: 현재 위치에서 가장 가까운 획부터(필요하면 뒤집어서), 끝이 가까우면 펜을 들지 않고 이어 붙인다
-    pos = (quad[0][0], quad[0][1])
-    left, ordered = list(cleaned), []
-    while left:
-        best = min(range(len(left)), key=lambda i: min(math.dist(pos, left[i][0]), math.dist(pos, left[i][-1])))
-        st = left.pop(best)
-        if math.dist(pos, st[-1]) < math.dist(pos, st[0]):
-            st = st[::-1]
+    # 4) 순서 정하기. topdown: 위에서 아래로, 같은 높이 띠 안에서는 왼쪽에서 오른쪽으로(읽는 순서, 눈으로 확인하기 쉽다).
+    #    nearest: 현재 위치에서 가장 가까운 획부터(펜 이동이 짧다). 어느 쪽이든 끝이 가까우면 펜을 들지 않고 이어 붙인다.
+    ordered = []
+
+    def add(st):
         if ordered and math.dist(ordered[-1][-1], st[0]) <= JOIN_MM:
             ordered[-1] = _resample(ordered[-1] + st[1:], step)
         else:
             ordered.append(st)
-        pos = ordered[-1][-1]
+
+    if order == "topdown":
+        top = max(p[1] for st in cleaned for p in st)
+        extent = top - min(p[1] for st in cleaned for p in st)
+        band = max(ORDER_BAND_MIN_MM, ORDER_BAND_FRAC * extent)
+
+        def key(st):
+            return (int((top - max(p[1] for p in st)) // band), min(p[0] for p in st))
+
+        for st in sorted(cleaned, key=key):
+            if st[-1][1] > st[0][1] + 1e-6:              # 위쪽 끝에서 시작한다
+                st = st[::-1]
+            add(st)
+    else:
+        pos = (quad[0][0], quad[0][1])
+        left = list(cleaned)
+        while left:
+            best = min(range(len(left)), key=lambda i: min(math.dist(pos, left[i][0]), math.dist(pos, left[i][-1])))
+            st = left.pop(best)
+            if math.dist(pos, st[-1]) < math.dist(pos, st[0]):
+                st = st[::-1]
+            add(st)
+            pos = ordered[-1][-1]
     if first_n:
         ordered = ordered[:first_n]
     pen_mm = sum(_length(st) for st in ordered)
 
     # 5) 높이를 붙여 경로 만들기
-    hd = 0.0 if mode == "draw" else air_mm
+    if not -8.0 <= trim <= 8.0:
+        raise DrawError("종이 높이 미세조정은 -8~8mm 사이여야 해요.")
+    hd = trim if mode == "draw" else air_mm            # trim: 음수면 종이 쪽으로 더 눌러서 그린다(펜이 안 닿을 때)
     hu = hd + lift
     if curve:
         return _curve_result(fr, info, ordered, hd, hu, quad, k, w, h, pen_mm, dropped, mode, tol, curve_step)
@@ -264,7 +293,7 @@ def plan(info, polylines, *, rotate=0, mirror=False, margin=MARGIN_MM, scale_pct
     kept.append(seq[-1])
     seq = kept
     if len(seq) - 1 > MAX_POINTS:
-        raise DrawError(f"점이 {len(seq) - 1}개로 너무 많아요(최대 {MAX_POINTS}개). 더 단순한 그림을 쓰거나 크기를 줄여 주세요.")
+        raise TooManyPoints(f"점이 {len(seq) - 1}개로 너무 많아요(최대 {MAX_POINTS}개). 더 단순한 그림을 쓰거나 크기를 줄여 주세요.")
     poses = [CY._at(fr, info["orientation"], a, b, hh) for a, b, hh, _, _ in seq]
     start, chain, meta = poses[0], poses[1:], seq[1:]
     dist = [math.dist(poses[i][:3], poses[i + 1][:3]) for i in range(len(poses) - 1)]   # dist[i]: poses[i]→poses[i+1]

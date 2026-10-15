@@ -295,6 +295,7 @@ def loop_run():
 # MoveL 을 blendR(0 이상, 비블로킹)로 연달아 보내 정지 없이 이어 간다. 컨트롤러 명령 큐는 볼 수 없으므로(이 로봇은 CNDE 가 안 붙는다)
 # 대신 **로봇의 실제 TCP 위치를 계속 읽어** 로봇이 어느 점까지 지나갔는지 따라가고, 지나간 점보다 LOOKAHEAD 개까지만 앞서서 보낸다.
 _cyl = {"state": "idle", "step": "", "sent": 0, "reached": 0, "total": 0, "error": "", "ahead_max": 0, "starved": 0}
+TRACE_MAX = 400000
 LOOKAHEAD = 8            # 로봇이 지나간 점보다 최대 이만큼만 앞서 보낸다(컨트롤러에 쌓아 두는 점의 수)
 REACH_CAP_MM = 4.0       # 로봇 위치가 점에서 이 거리 안이면 그 점을 지나간 것으로 본다(가장 짧은 구간의 60%를 넘지 않게)
 NO_PROGRESS_S = 6.0      # 로봇 위치가 이 시간 동안 거의 안 변하는데 앞에 보낸 점이 남아 있으면 멈춘 것으로 보고 정지한다
@@ -325,7 +326,7 @@ def _cyl_params(data):
     return CY.route(_analyze(), r=r, z0=z0, height=h, segments=seg)
 
 
-def _follow_chain(rm, start, chain, blends, reaches, vel, report, label=lambda i: ""):
+def _follow_chain(rm, start, chain, blends, reaches, vel, report, label=lambda i: "", trace=None):
     """로봇이 start 에 이미 있다고 보고, chain 을 blend 로 이어서 보낸다. 로봇의 실제 위치로 지나간 점을 따라가며 LOOKAHEAD 개까지만 앞서 보낸다.
     blends[i]·reaches[i] 는 chain[i] 의 평활 반경(마지막은 -1 = 도착까지 기다림)과 '지나갔다'고 보는 거리다.
     report(**상태) 로 진행을 알린다. 반환: ("ok", "") | ("stopped", "") | ("error", 메시지) — 에러면 이미 로봇을 정지시켰다."""
@@ -350,6 +351,8 @@ def _follow_chain(rm, start, chain, blends, reaches, vel, report, label=lambda i
                 return "error", f"로봇 위치를 계속 읽지 못해 멈췄어요: {e}"
             time.sleep(SEND_SLEEP_S)
             continue
+        if trace is not None and len(trace) < TRACE_MAX and (not trace or math.dist(tcp[:3], trace[-1]) > 0.2):
+            trace.append(tcp[:3])                          # 실제로 지나간 로봇 위치(계획 경로와 비교하려고 모아 둔다)
         for i in range(reached + 1, min(reached + LOOKAHEAD + 2, len(route))):     # 지나간 점 갱신(앞쪽 창 안에서만)
             if math.dist(tcp[:3], pts[i]) <= reaches[i - 1]:
                 reached = i
@@ -386,7 +389,22 @@ def _follow_chain(rm, start, chain, blends, reaches, vel, report, label=lambda i
     return "ok", ""
 
 
-def _stream(rm, start, chain, blends, reaches, vel, setter, label):
+def _tracking_error(route, trace):
+    """계획한 경로(route: 자세 목록)와 실제 지나간 위치(trace)의 거리 통계(mm). 경로를 0.25mm 간격으로 촘촘히 찍어 가장 가까운 점까지의 거리를 잰다."""
+    if len(trace) < 5 or len(route) < 2:
+        return None
+    from scipy.spatial import cKDTree
+    pts = []
+    for i in range(len(route) - 1):
+        p, q = route[i][:3], route[i + 1][:3]
+        n = max(1, int(math.dist(p, q) / 0.25))
+        pts += [[p[k] + (q[k] - p[k]) * t / n for k in range(3)] for t in range(n)]
+    pts.append(list(route[-1][:3]))
+    d = sorted(float(x) for x in cKDTree(pts).query(trace)[0])
+    return {"n": len(d), "mean": round(sum(d) / len(d), 2), "p95": round(d[int(0.95 * (len(d) - 1))], 2), "max": round(d[-1], 2)}
+
+
+def _stream(rm, start, chain, blends, reaches, vel, setter, label, on_trace=None):
     """start 로 블로킹 이동한 뒤 chain 을 이어서 보낸다(원통·직선 이음 그리기용)."""
     try:
         setter(state="running", step="시작점으로 이동", sent=0, reached=0, total=len(chain), error="", ahead_max=0, starved=0)
@@ -395,7 +413,14 @@ def _stream(rm, start, chain, blends, reaches, vel, setter, label):
             setter(state="stopped" if _abort.is_set() else "error", step="",
                    error="" if _abort.is_set() else f"시작점 이동을 로봇이 거부했어요(코드 {code}).")
             return
-        status, msg = _follow_chain(rm, start, chain, blends, reaches, vel, setter, label)
+        trace = []
+        status, msg = _follow_chain(rm, start, chain, blends, reaches, vel, setter, label, trace)
+        try:
+            setter(track=_tracking_error([start] + chain, trace))
+            if on_trace:
+                on_trace(trace)
+        except Exception:
+            pass
         if status == "ok":
             setter(state="done", step="")
         elif status == "stopped":
@@ -483,7 +508,7 @@ def cyl_run():
 
 
 # ---------------------------------------------------------------- SVG 그리기: SVG 의 선을 종이 구역에 맞춰 끊김 없이 이어서 그린다(원통과 같은 이동 방식)
-_draw = {"state": "idle", "step": "", "sent": 0, "reached": 0, "total": 0, "error": "", "ahead_max": 0, "starved": 0, "fallback": 0}
+_draw = {"state": "idle", "step": "", "sent": 0, "reached": 0, "total": 0, "error": "", "ahead_max": 0, "starved": 0, "fallback": 0, "track": None}
 
 
 def _set_draw(**kw):
@@ -497,7 +522,7 @@ def _draw_plan(data):
                     scale_pct=float(data.get("scale_pct", 100)), lift=float(data.get("lift", 8)), mode=data.get("mode"),
                     air_mm=float(data.get("air_mm", 30)), tol=float(data.get("tol", D.TOL_MM)),
                     min_seg=float(data.get("min_seg", D.MIN_SEG_MM)), min_stroke=float(data.get("min_stroke", D.MIN_STROKE_MM)),
-                    curve=bool(data.get("curve", False)), curve_step=float(data.get("curve_step", D.CURVE_STEP_MM)), first_n=int(data.get("first_n", 0) or 0))
+                    trim=float(data.get("trim", 0) or 0), order=str(data.get("order") or "topdown"), curve=bool(data.get("curve", False)), curve_step=float(data.get("curve_step", D.CURVE_STEP_MM)), first_n=int(data.get("first_n", 0) or 0))
     except (TypeError, ValueError):
         raise D.DrawError("회전·여백·크기·높이는 숫자여야 해요.")
     level = _level(data)
@@ -507,13 +532,29 @@ def _draw_plan(data):
             pen = float(data.get("pen_mm") or 0.8)
         except (TypeError, ValueError):
             pen = 0.8
-        seg_lo = max(0.3, min(1.2, 0.9 * pen))
+        try:
+            floor = float(data.get("seg_floor") or 1.0)
+        except (TypeError, ValueError):
+            floor = 1.0
+        seg_lo = max(0.3, floor, min(1.2, 0.9 * pen))               # 로봇이 한 점씩 따라가는 한계: 점 간격은 floor(기본 1mm) 아래로 내려가지 않는다
         tol_lo = max(0.03, min(0.1, 0.25 * pen))
-        opts.update(min_stroke=round((1 - t) ** 2 * 6.0, 2), keep_dots=t >= 0.7,
+        opts.update(min_stroke=round(max((1 - t) ** 2 * 6.0, 1.2 * pen), 2), keep_dots=t >= 0.7,   # 펜 굵기의 1.2배보다 짧은 조각은 점처럼 보여서 뺀다
+                    
                     min_seg=round(seg_lo + (max(opts["min_seg"], seg_lo) - seg_lo) * (1 - t), 3), tol=round(tol_lo + (0.4 - tol_lo) * (1 - t) ** 2, 3))
     parsed = S.parse_svg(data.get("svg"))
-    plan = D.plan(_analyze(), parsed["polylines"], **opts)
+    info0 = _analyze()
+    seg0 = opts["min_seg"]
+    for _ in range(12):                                         # 점이 너무 많으면(가는 펜으로 꽉 채울 때) 점 간격을 조금씩 넓혀서 한도 안에 맞춘다
+        try:
+            plan = D.plan(info0, parsed["polylines"], **opts)
+            break
+        except D.TooManyPoints:
+            if opts["min_seg"] >= 4.0:
+                raise
+            opts["min_seg"] = round(opts["min_seg"] * 1.25, 3)
     plan["warnings"] = parsed["warnings"] + plan["warnings"]
+    if opts["min_seg"] > seg0:
+        plan["warnings"].append(f"점이 너무 많아서 점 간격을 {seg0}mm → {opts['min_seg']}mm 로 넓혔어요. 아주 작은 굴곡은 조금 각져 보일 수 있어요.")
     if plan["info"]["points"] > 10000:
         plan["warnings"].append(f"점이 {plan['info']['points']}개, 선 길이 약 {plan['info']['pen_mm'] / 1000:.1f}m 라 시간이 오래 걸려요. 속도가 높으면 점을 못 따라 보내 끊길 수 있으니 처음엔 \"처음 N획만\"으로 시험하세요.")
     if parsed.get("pen_px"):
@@ -562,7 +603,7 @@ def _spline_worker(rm, plan, vel, avg_ms, spline_vel=None):
     tool, user = rm.default_tool, rm.default_user
     svel = spline_vel or vel                                   # 곡선(스플라인)만 따로 속도를 정할 수 있다
     try:
-        _set_draw(state="running", step="", sent=0, reached=0, total=len(ops), error="", ahead_max=0, starved=0, fallback=0)
+        _set_draw(state="running", step="", sent=0, reached=0, total=len(ops), error="", ahead_max=0, starved=0, fallback=0, track=None)
         for i, (kind, arg, name) in enumerate(ops):
             if _abort.is_set():
                 _set_draw(state="stopped", step="")
@@ -635,6 +676,40 @@ def _spline_worker(rm, plan, vel, avg_ms, spline_vel=None):
         _motion_lock.release()
 
 
+TRACE_FILE = os.path.join(HERE, "paper_last_trace.json")     # 서버를 다시 켜도 마지막 실제 경로가 남도록 파일에도 저장한다
+try:
+    with open(TRACE_FILE, encoding="utf-8") as _f:
+        _last_trace = json.load(_f)
+except (OSError, ValueError):
+    _last_trace = {"time": "", "uv": []}
+
+
+def _save_trace(trace):
+    """실제로 지나간 로봇 위치(TCP)를 펜 끝 위치로 바꿔 종이 평면 좌표 (u, v, 종이 위 높이)로 저장한다. 미리보기와 겹쳐 비교하려고 쓴다."""
+    info = _analyze()
+    fr = CY.frame(info)
+    R = L.rot(*info["orientation"])
+    off = L._tool_off(R, info["pen_off"])
+    step = max(1, len(trace) // 30000)
+    uv = []
+    for p in trace[::step]:
+        d = [p[i] + off[i] - fr["o"][i] for i in range(3)]
+        uv.append([round(CY._dot(d, fr["u"]), 2), round(CY._dot(d, fr["v"]), 2), round(CY._dot(d, fr["n"]) - fr["plane_z"], 2)])
+    with _lock:
+        _last_trace.update(time=time.strftime("%Y-%m-%d %H:%M:%S"), uv=uv)
+        tmp = TRACE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_last_trace, f)
+        os.replace(tmp, TRACE_FILE)
+
+
+@app.get("/api/draw/trace")
+def draw_trace():
+    """마지막 그리기에서 로봇이 실제로 지나간 경로(펜 끝, 종이 평면 좌표)."""
+    with _lock:
+        return jsonify(dict(_last_trace))
+
+
 def _draw_worker(rm, plan, vel):
     stroke_of, n = plan["stroke_of"], plan["info"]["strokes"]
 
@@ -642,7 +717,7 @@ def _draw_worker(rm, plan, vel):
         s = stroke_of[i]
         return f"획 {s + 1}/{n} 그리는 중" if s >= 0 else "펜 들고 이동 중"
 
-    _stream(rm, plan["start"], plan["chain"], plan["blends"], plan["reaches"], vel, _set_draw, label)
+    _stream(rm, plan["start"], plan["chain"], plan["blends"], plan["reaches"], vel, _set_draw, label, on_trace=_save_trace)
 
 
 # MindDraw(../painting)가 만든 선그림 목록과 그림 → SVG 변환(중심선 따라가기)
@@ -661,6 +736,17 @@ def draw_image(name):
     if not ART_RE.match(name):
         return _err("이미지 이름이 올바르지 않아요.", 404)
     return send_from_directory(ART_DIR, name)
+
+
+def _overlap(data):
+    """채우기 고리를 겹쳐 그리는 비율(0~60%). 화면 입력은 %, 없으면 기본값."""
+    v = data.get("overlap")
+    if v is None or v == "":
+        return V.FILL_OVERLAP
+    v = float(v) / 100.0
+    if not 0.0 <= v <= 0.6:
+        raise ValueError("채우기 겹침은 0~60% 사이여야 해요.")
+    return v
 
 
 def _level(data):
@@ -693,8 +779,8 @@ def draw_vectorize():
         if data.get("pen_mm"):
             # 펜 끝 굵기(mm) → 그림 속 펜 굵기(px): 저장한 종이에 이 그림을 맞췄을 때의 배율(mm/px)로 환산한다
             pen_mm = float(data["pen_mm"])
-            if not 0.2 <= pen_mm <= 10.0:
-                return _err("펜 끝 굵기는 0.2~10mm 사이여야 해요.")
+            if not 0.05 <= pen_mm <= 10.0:
+                return _err("펜 굵기는 0.05~10mm 사이여야 해요.")
             r0 = V.to_strokes(raw, fill=False)
             pl = S.parse_svg(V.to_svg(r0["strokes"], r0["size"]))["polylines"]
             try:
@@ -702,13 +788,13 @@ def draw_vectorize():
                             margin=float(data.get("margin", D.MARGIN_MM)), scale_pct=float(data.get("scale_pct", 100)))
             except (D.DrawError, L.LoopError) as e:
                 return _err(f"펜 굵기(mm)로 계산하려면 종이 모서리 4곳이 먼저 필요해요: {e}")
-            res = V.vectorize(raw, float(data.get("min_stroke_px", V.MIN_STROKE_PX)), fill=fill, pen_px=pen_mm / p0["info"]["scale"], detail=bool(data.get("detail", False)), detail_level=_level(data))
+            res = V.vectorize(raw, float(data.get("min_stroke_px", V.MIN_STROKE_PX)), fill=fill, pen_px=pen_mm / p0["info"]["scale"], detail=bool(data.get("detail", False)), detail_level=_level(data), overlap=_overlap(data))
             res.update(pen_mm=pen_mm, mm_per_px=p0["info"]["scale"])
             if res["pen_px"] < THIN_PEN_PX:
                 res["warning"] = (f"펜이 그림 속에서 {res['pen_px']}px 로 원본 선(약 5px)보다 가늘어서, 굵은 선과 검은 부분은 여러 번 겹쳐 그려 원본과 같게 만들어요. "
                                   "그만큼 점이 많아지고 시간이 오래 걸려요.")
             return jsonify(res)
-        return jsonify(V.vectorize(raw, float(data.get("min_stroke_px", V.MIN_STROKE_PX)), float(data.get("pen_pct", 60)), fill, detail=bool(data.get("detail", False)), detail_level=_level(data)))
+        return jsonify(V.vectorize(raw, float(data.get("min_stroke_px", V.MIN_STROKE_PX)), float(data.get("pen_pct", 60)), fill, detail=bool(data.get("detail", False)), detail_level=_level(data), overlap=_overlap(data)))
     except (V.VecError, ValueError) as e:
         return _err(str(e))
 

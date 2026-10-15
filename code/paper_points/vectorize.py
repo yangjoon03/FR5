@@ -13,6 +13,8 @@ import paper_draw as D
 
 MAX_SIDE_PX = 1200          # 이보다 크면 줄여서 처리한다
 LOOP_WIDER = 0.5            # 고리 한 겹을 더 그리려면 그 덩어리가 이 겹보다 펜 굵기의 이 비율만큼은 더 넓어야 한다
+DOT_MAX_AREA_PEN2 = 8       # 점(동그라미)을 찍을 수 있는 혼자 떨어진 덩어리의 최대 넓이(펜 굵기² 의 배수)
+FILL_OVERLAP = 0.30         # 채우기 고리를 펜 굵기의 이만큼 겹쳐 그린다(실제 선이 설정보다 가늘어도 틈이 안 남게)
 FILL_PASSES = 3             # 굵은 부분을 중심선으로 다시 채우는 최대 횟수
 MIN_BLOB_PX = 12            # 이보다 작은 얼룩(먼지)은 지운다
 MIN_STROKE_PX = 4           # 이보다 짧은 획(곁가지·점)은 버린다
@@ -23,6 +25,9 @@ THICK_PEN_PX = 7            # 그림 속 펜 굵기가 이 이상이면 펜보�
 DETAIL_BLOB_PX = 5          # 최대 디테일일 때 지우는 얼룩 크기 하한
 DETAIL_SPUR_PX = 4          # 최대 디테일일 때 지우는 곁가지 길이 하한
 DETAIL_MIN_STROKE_PX = 2    # 최대 디테일일 때 버리는 짧은 선 하한
+MIN_PEN_PX = 2.0            # 펜이 이보다 가늘면(원본 해상도로는 한 칸도 안 됨) 그림을 키워서 변환한다
+MAX_UP = 6                 # 최대 확대 배수
+MAX_WORK_PX = 3000         # 확대한 뒤에도 이 크기(긴 변)를 넘기지 않는다(처리 시간·메모리)
 RDP_PX = 0.5                # SVG 로 내보낼 때 단순화 오차(픽셀)
 MAX_BYTES = 12_000_000
 
@@ -47,10 +52,10 @@ def _decode(data):
     return img
 
 
-def _skeleton(gray, min_blob=MIN_BLOB_PX, close_px=0):
+def _skeleton(gray, min_blob=MIN_BLOB_PX, close_px=0, max_side=MAX_SIDE_PX):
     h, w = gray.shape
-    if max(h, w) > MAX_SIDE_PX:
-        k = MAX_SIDE_PX / max(h, w)
+    if max(h, w) > max_side:
+        k = max_side / max(h, w)
         gray = cv2.resize(gray, (round(w * k), round(h * k)), interpolation=cv2.INTER_AREA)
     if gray.min() == gray.max():
         raise VecError("그림에 선이 없어요(한 가지 색이에요).")
@@ -233,11 +238,12 @@ def _paint(mask, strokes, width):
         cv2.polylines(mask, [np.round(np.array(s)).astype(np.int32)], False, 255, max(1, int(round(width))), cv2.LINE_8)
 
 
-def _loops(ink, pen):
+def _loops(ink, pen, step=None):
     """굵은 부분을 펜 굵기 간격의 안쪽 윤곽선 고리로 채운다(윤곽을 따라 안쪽으로 한 겹씩). 원본 모양 그대로 칠해진다."""
     up = 2                                                     # 2배로 키워서 윤곽을 매끈하게
     big = (cv2.resize(ink, None, fx=up, fy=up, interpolation=cv2.INTER_LINEAR) > 127).astype(np.uint8) * 255
     dist = cv2.distanceTransform(big, cv2.DIST_L2, 5) / up
+    step = step or pen
     loops, d, maxd = [], pen / 2.0, float(dist.max())
     while d <= maxd:
         n, lab = cv2.connectedComponents((dist >= d).astype(np.uint8), connectivity=8)
@@ -252,7 +258,7 @@ def _loops(ink, pen):
                 pts = D._rdp(pts + [pts[0]], RDP_PX)
                 if len(pts) >= 4:
                     loops.append(pts)
-        d += pen
+        d += step
     return loops
 
 
@@ -264,7 +270,7 @@ def detail_params(level):
     return int(round(5 + s * 100)), int(round(4 + s * 20)), 2 + s * 28, 0.25 + (1 - t) * 1.0
 
 
-def to_strokes(data, min_stroke_px=MIN_STROKE_PX, pen_pct=60.0, fill=True, pen_px=None, detail=False, detail_level=None):
+def to_strokes(data, min_stroke_px=MIN_STROKE_PX, pen_pct=60.0, fill=True, pen_px=None, detail=False, detail_level=None, overlap=FILL_OVERLAP):
     """이미지 바이트 → {"strokes": [[(x,y)...]], "size": (w,h), "pen_px": 펜 굵기(px)}
     펜 굵기 = 원본 선 굵기 × pen_pct%. 펜보다 굵은 부분은 윤곽을 따라 안쪽으로 한 겹씩 고리로 채우고(fill=True),
     펜보다 가는 선과 남은 부분은 중심선으로 긋는다. 펜이 가늘수록(pen_pct 낮을수록) 원본과 같아진다."""
@@ -272,20 +278,32 @@ def to_strokes(data, min_stroke_px=MIN_STROKE_PX, pen_pct=60.0, fill=True, pen_p
     t = float(detail_level) / 100.0 if detail_level is not None else (1.0 if detail else 0.75)
     blob, spur, min_stroke_px, fill_min = detail_params(t)
     hi = t >= 0.9
+    gray = _decode(data)
+    gh, gw = gray.shape
+    if max(gh, gw) > MAX_SIDE_PX:
+        k = MAX_SIDE_PX / max(gh, gw)
+        gray = cv2.resize(gray, (round(gw * k), round(gh * k)), interpolation=cv2.INTER_AREA)
+    up = 1                                                      # 가는 펜: 그림을 키워서 굵은 부분을 펜 폭 간격으로 빈틈없이 채운다(키우지 않으면 한 칸보다 가는 간격을 못 만든다)
+    if fill and pen_px and pen_px < MIN_PEN_PX:
+        up = max(1, min(MAX_UP, int(math.ceil(MIN_PEN_PX / pen_px)), MAX_WORK_PX // max(gray.shape)))
+        gray = cv2.resize(gray, None, fx=up, fy=up, interpolation=cv2.INTER_CUBIC)
+        pen_px = pen_px * up
+        blob *= up * up; spur *= up; min_stroke_px *= up
     close_px = 0
     if pen_px and pen_px >= THICK_PEN_PX:                       # 펜이 굵으면 펜보다 작은 디테일은 뭉개져서 지저분해지니 같이 정리한다(최대 디테일이어도)
         close_px = int(round(0.5 * pen_px)) | 1
         blob = max(blob, int(0.35 * pen_px * pen_px))
         spur = max(spur, int(0.8 * pen_px))
         min_stroke_px = max(min_stroke_px, 1.2 * pen_px)
-    ink, sk, (h, w) = _skeleton(_decode(data), blob, close_px)
+    ink, sk, (h, w) = _skeleton(gray, blob, close_px, max_side=10 ** 9)
     dist = cv2.distanceTransform(ink, cv2.DIST_L2, 3)
     line_px = 2.0 * float(np.median(dist[sk]))                   # 원본 선 굵기(px)
     pen = max(1.5, float(pen_px)) if pen_px else max(2.0, line_px * pen_pct / 100.0)
-    out = [lp for lp in _loops(ink, pen) if _plength(lp) >= min_stroke_px] if fill else []
+    out = [lp for lp in _loops(ink, pen, pen * (1.0 - min(0.6, max(0.0, overlap)))) if _plength(lp) >= min_stroke_px] if fill else []
     covered = np.zeros(ink.shape, np.uint8)
     _paint(covered, out, pen)
     near = cv2.dilate(covered, np.ones((5, 5), np.uint8))
+    _, ink_lab, ink_stats, _ = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8), connectivity=8)   # 원본 선·점 덩어리(혼자 떨어진 점 판별용)
     for it in range(FILL_PASSES if fill else 1):
         resid_all = ((ink > 0) & (covered == 0)).astype(np.uint8) * 255
         opened = cv2.morphologyEx(resid_all, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
@@ -297,7 +315,13 @@ def to_strokes(data, min_stroke_px=MIN_STROKE_PX, pen_pct=60.0, fill=True, pen_p
             break
         new = _clean(_trace(cv2.ximgproc.thinning(resid, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN) > 0, spur), min_stroke_px if it == 0 else max(1.5 if hi else 3.0, fill_min * pen))
         made = np.zeros(ink.shape, np.uint8); _paint(made, new, pen)
-        for c in range(1, n):                                      # 중심선이 안 나오는 작은 덩어리(점)는 작은 동그라미로
+        for c in range(1, n):                                      # 중심선이 안 나오는 작은 덩어리는 작은 동그라미(점)로. 단, 원본에서 **혼자 떨어진 작은 점**일 때만
+            if not keep[c]:                                         # (굵은 선 곁에 남은 찌꺼기는 점으로 찍으면 선 위에 엉뚱한 점이 생긴다)
+                continue
+            cx_, cy_ = int(cent[c][0]), int(cent[c][1])
+            ink_id = ink_lab[min(max(cy_, 0), ink_lab.shape[0] - 1), min(max(cx_, 0), ink_lab.shape[1] - 1)]
+            if ink_id == 0 or ink_stats[ink_id, cv2.CC_STAT_AREA] > max(40, DOT_MAX_AREA_PEN2 * pen * pen):
+                continue
             if keep[c] and not (made[lab == c] > 0).any():
                 r = max(1.0, math.sqrt(stats[c, cv2.CC_STAT_AREA] / math.pi) * 0.5)
                 new.append(_circle(float(cent[c][0]), float(cent[c][1]), r))
@@ -308,7 +332,10 @@ def to_strokes(data, min_stroke_px=MIN_STROKE_PX, pen_pct=60.0, fill=True, pen_p
         near = cv2.dilate(covered, np.ones((5, 5), np.uint8))
     if not out:
         raise VecError("그릴 수 있는 선이 남지 않았어요.")
-    return {"strokes": out, "size": (w, h), "pen_px": round(pen, 1), "line_px": round(line_px, 1)}
+    if up > 1:                                                  # 원래 그림 좌표로 되돌린다
+        out = [[(round(x / up, 2), round(y / up, 2)) for x, y in st] for st in out]
+        w, h, pen, line_px = w // up, h // up, pen / up, line_px / up
+    return {"strokes": out, "size": (w, h), "pen_px": round(pen, 2), "line_px": round(line_px, 1)}
 
 
 def to_svg(strokes, size, pen_px=0):
@@ -317,7 +344,7 @@ def to_svg(strokes, size, pen_px=0):
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" data-pen-px="{pen_px}">\n{body}\n</svg>'
 
 
-def vectorize(data, min_stroke_px=MIN_STROKE_PX, pen_pct=60.0, fill=True, pen_px=None, detail=False, detail_level=None):
-    r = to_strokes(data, min_stroke_px, pen_pct, fill, pen_px, detail, detail_level)
+def vectorize(data, min_stroke_px=MIN_STROKE_PX, pen_pct=60.0, fill=True, pen_px=None, detail=False, detail_level=None, overlap=FILL_OVERLAP):
+    r = to_strokes(data, min_stroke_px, pen_pct, fill, pen_px, detail, detail_level, overlap)
     return {"svg": to_svg(r["strokes"], r["size"], r["pen_px"]), "strokes": len(r["strokes"]), "size": list(r["size"]),
             "points": sum(len(s) for s in r["strokes"]), "pen_px": r["pen_px"]}
