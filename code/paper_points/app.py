@@ -75,6 +75,9 @@ def _save(points, why=""):
     os.replace(tmp, POINTS_FILE)
 
 
+FILL_PEN_MIN_MM = 0.1   # 채우기 간격·점 간격을 정할 때 쓰는 펜 굵기의 하한(가는 펜은 같은 자리를 여러 번 그어 채운다)
+FINE_PEN_MM = 0.4       # 이보다 가는 펜은 겹침을 20%로(0.05mm 간격은 로봇 오차보다 촘촘하니 펜 폭 간격으로 여러 줄)
+CLEAN_MM = 0.6         # 이보다 작은 무늬(넥타이 체크무늬 같은)는 로봇이 따라가지 못하고 선이 엉키니 펜이 가늘어도 이 크기 기준으로 정리한다
 THIN_PEN_PX = 2.5   # 그림 속 펜 굵기가 이보다 가늘면 경고
 SETTINGS_FILE = os.path.join(HERE, "paper_settings.json")
 DEFAULT_SETTINGS = {"pen_mm": 0.0, "pen_x": 0.0, "pen_y": 0.0, "tip_tcp": False, "align": False}
@@ -529,7 +532,7 @@ def _draw_plan(data):
     t = level / 100.0 if level is not None else (1.0 if data.get("detail") else None)
     if t is not None:                                           # 디테일 수준: 낮으면 짧은 선·점을 버리고 점 간격·오차를 크게, 높으면 펜 굵기에 맞춰 촘촘히
         try:
-            pen = float(data.get("pen_mm") or 0.8)
+            pen = max(float(data.get("pen_mm") or 0.8), FILL_PEN_MIN_MM)
         except (TypeError, ValueError):
             pen = 0.8
         try:
@@ -538,7 +541,7 @@ def _draw_plan(data):
             floor = 1.0
         seg_lo = max(0.3, floor, min(1.2, 0.9 * pen))               # 로봇이 한 점씩 따라가는 한계: 점 간격은 floor(기본 1mm) 아래로 내려가지 않는다
         tol_lo = max(0.03, min(0.1, 0.25 * pen))
-        opts.update(min_stroke=round(max((1 - t) ** 2 * 6.0, 1.2 * pen), 2), keep_dots=t >= 0.7,   # 펜 굵기의 1.2배보다 짧은 조각은 점처럼 보여서 뺀다
+        opts.update(min_stroke=round(max((1 - t) ** 2 * 6.0, 0.4 * pen), 2), keep_dots=t >= 0.7,   # 펜 굵기의 0.4배보다 짧은 조각만 뺀다(눈동자 속 같은 짧은 채우기 획은 남긴다. 먼지 같은 짧은 조각은 변환 단계에서 이미 걸러진다)
                     
                     min_seg=round(seg_lo + (max(opts["min_seg"], seg_lo) - seg_lo) * (1 - t), 3), tol=round(tol_lo + (0.4 - tol_lo) * (1 - t) ** 2, 3))
     parsed = S.parse_svg(data.get("svg"))
@@ -722,7 +725,7 @@ def _draw_worker(rm, plan, vel):
 
 # MindDraw(../painting)가 만든 선그림 목록과 그림 → SVG 변환(중심선 따라가기)
 ART_DIR = os.path.join(os.environ.get("MINDDRAW_DATA") or os.path.join(HERE, "..", "painting", "data"), "current", "images")
-ART_RE = re.compile(r"^art_\d+\.png$")
+ART_RE = re.compile(r"^(art_\d+|panel_\d+_[1-4])\.png$")   # art = 장면 그림 전체, panel = 네 컷 중 한 컷(그 컷만 종이 전체 크기로 그린다)
 
 
 @app.get("/api/draw/images")
@@ -738,11 +741,11 @@ def draw_image(name):
     return send_from_directory(ART_DIR, name)
 
 
-def _overlap(data):
-    """채우기 고리를 겹쳐 그리는 비율(0~60%). 화면 입력은 %, 없으면 기본값."""
+def _overlap(data, default=None):
+    """채우기 고리를 겹쳐 그리는 비율(0~60%). 화면 입력은 %, 없으면 default(없으면 기본값)."""
     v = data.get("overlap")
     if v is None or v == "":
-        return V.FILL_OVERLAP
+        return V.FILL_OVERLAP if default is None else default
     v = float(v) / 100.0
     if not 0.0 <= v <= 0.6:
         raise ValueError("채우기 겹침은 0~60% 사이여야 해요.")
@@ -788,11 +791,14 @@ def draw_vectorize():
                             margin=float(data.get("margin", D.MARGIN_MM)), scale_pct=float(data.get("scale_pct", 100)))
             except (D.DrawError, L.LoopError) as e:
                 return _err(f"펜 굵기(mm)로 계산하려면 종이 모서리 4곳이 먼저 필요해요: {e}")
-            res = V.vectorize(raw, float(data.get("min_stroke_px", V.MIN_STROKE_PX)), fill=fill, pen_px=pen_mm / p0["info"]["scale"], detail=bool(data.get("detail", False)), detail_level=_level(data), overlap=_overlap(data))
+            res = V.vectorize(raw, float(data.get("min_stroke_px", V.MIN_STROKE_PX)), fill=fill, pen_px=max(pen_mm, FILL_PEN_MIN_MM) / p0["info"]["scale"], detail=bool(data.get("detail", False)), detail_level=_level(data), overlap=_overlap(data, 0.2 if pen_mm < FINE_PEN_MM else None),
+                               clean_px=CLEAN_MM / p0["info"]["scale"])
             res.update(pen_mm=pen_mm, mm_per_px=p0["info"]["scale"])
             if res["pen_px"] < THIN_PEN_PX:
                 res["warning"] = (f"펜이 그림 속에서 {res['pen_px']}px 로 원본 선(약 5px)보다 가늘어서, 굵은 선과 검은 부분은 여러 번 겹쳐 그려 원본과 같게 만들어요. "
                                   "그만큼 점이 많아지고 시간이 오래 걸려요.")
+            if p0["info"]["scale"] < 0.22 and pen_mm > 0.6:       # 네 컷 전체처럼 한 장에 작은 그림이 촘촘히 든 경우: 굵은 펜으로는 눈·입 같은 작은 부분이 뭉개진다
+                res["warning"] = ((res.get("warning") or "") + " 이 그림은 작은 그림이 촘촘히 들어 있어서 펜이 굵으면 눈·입 같은 부분이 뭉개져요. 네 컷 중 한 컷만 고르면(그림 목록의 '네 컷 중 N컷만') 종이 전체 크기로 그려서 또렷해요.").strip()
             return jsonify(res)
         return jsonify(V.vectorize(raw, float(data.get("min_stroke_px", V.MIN_STROKE_PX)), float(data.get("pen_pct", 60)), fill, detail=bool(data.get("detail", False)), detail_level=_level(data), overlap=_overlap(data)))
     except (V.VecError, ValueError) as e:
